@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Detect Email — AI Phishing Defense</title>
+<style>
+:root {
+  --bg:#0b0f1a; --bg-card:#111827; --bg-card2:#1a2236; --border:#1e293b;
+  --text:#e2e8f0; --text-dim:#94a3b8; --accent:#3b82f6; --accent2:#06b6d4;
+  --green:#22c55e; --red:#ef4444; --orange:#f59e0b; --purple:#a855f7;
+  --radius:12px; --shadow:0 4px 24px rgba(0,0,0,0.3);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh}
+
+.header{background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%);border-bottom:1px solid var(--border);padding:1rem 0;text-align:center;position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(59,130,246,0.15)0%,transparent 70%);pointer-events:none}
+.header h1{font-size:1.8rem;font-weight:700;background:linear-gradient(135deg,#60a5fa,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;position:relative}
+.header p{color:var(--text-dim);font-size:0.85rem;position:relative}
+
+.status-bar{display:flex;justify-content:center;gap:1.5rem;padding:0.6rem 2rem;background:var(--bg-card);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.status-item{display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;color:var(--text-dim)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px rgba(34,197,94,0.5);animation:pulse 2s infinite}
+.status-dot.loading{background:var(--orange);box-shadow:0 0 6px rgba(245,158,11,0.5)}
+.status-dot.error{background:var(--red);box-shadow:0 0 6px rgba(239,68,68,0.5);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+
+/* Tabs */
+.tab-bar{display:flex;background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 1rem}
+.tab{padding:0.6rem 1.2rem;font-size:0.8rem;font-weight:600;color:var(--text-dim);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab .badge-count{display:inline-block;background:var(--red);color:#fff;font-size:0.6rem;padding:0 0.35rem;border-radius:8px;margin-left:0.3rem;min-width:14px;text-align:center}
+
+/* Main Layout */
+.main-grid{display:grid;grid-template-columns:320px 1fr;gap:0;min-height:calc(100vh - 130px)}
+@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
+
+/* Left Panel */
+.left-panel{background:var(--bg-card);border-right:1px solid var(--border);padding:1rem;overflow-y:auto;max-height:calc(100vh - 130px)}
+.section-title{font-size:0.9rem;font-weight:600;margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem}
+
+.pipeline-mini{display:flex;gap:0.3rem;margin-bottom:1rem}
+.pipe-step{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.3rem;text-align:center;font-size:0.6rem}
+.pipe-step .label{font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.pipe-step.gw .label{color:#60a5fa}.pipe-step.l1 .label{color:#fbbf24}.pipe-step.l2 .label{color:#c084fc}.pipe-step.l3 .label{color:#f87171}.pipe-step.op .label{color:#a78bfa}
+
+.form-group{margin-bottom:0.6rem}
+.form-group label{display:block;font-size:0.65rem;color:var(--text-dim);margin-bottom:0.15rem;font-weight:500;text-transform:uppercase;letter-spacing:0.5px}
+.form-group input,.form-group textarea,.form-group select{width:100%;padding:0.4rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:0.75rem;font-family:inherit;resize:vertical}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{outline:none;border-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;gap:0.3rem;padding:0.4rem 0.8rem;border:none;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;transition:all 0.2s;font-family:inherit}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,0.3)}
+.btn-primary:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+.btn-sm{padding:0.3rem 0.6rem;font-size:0.65rem}
+.btn-secondary{background:var(--bg-card2);color:var(--text-dim);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--border);color:var(--text)}
+.btn-danger{background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)}
+.btn-danger:hover{background:rgba(239,68,68,0.25)}
+.btn-green{background:rgba(34,197,94,0.15);color:#4ade80;border:1px solid rgba(34,197,94,0.3)}
+.btn-green:hover{background:rgba(34,197,94,0.25)}
+.btn-purple{background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.3)}
+.btn-purple:hover{background:rgba(168,85,247,0.25)}
+
+/* Right Panel */
+.right-panel{padding:1rem;overflow-y:auto;max-height:calc(100vh - 130px)}
+.tab-content{display:none}.tab-content.active{display:block}
+
+/* Email Cards */
+.email-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.8rem;overflow:hidden;transition:border-color 0.3s}
+.email-card.processing{border-color:var(--accent);box-shadow:0 0 8px rgba(59,130,246,0.1)}
+.email-card.verdict-safe{border-left:3px solid var(--green)}
+.email-card.verdict-phishing{border-left:3px solid var(--red)}
+.email-card.verdict-operator{border-left:3px solid var(--purple)}
+
+.email-header{display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0.8rem;border-bottom:1px solid var(--border);cursor:pointer}
+.email-header:hover{background:var(--bg-card2)}
+.email-meta{flex:1;min-width:0}
+.email-from{font-size:0.75rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.email-subject{font-size:0.7rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.email-badge{flex-shrink:0;padding:0.15rem 0.5rem;border-radius:5px;font-size:0.6rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-left:0.4rem}
+.badge-processing{background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)}
+.badge-deliver,.badge-release{background:rgba(34,197,94,0.15);color:#4ade80;border:1px solid rgba(34,197,94,0.3)}
+.badge-reject,.badge-delete{background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)}
+.badge-operator_review{background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.3)}
+
+.email-body{display:none;padding:0}.email-body.open{display:block}
+
+/* Timeline */
+.timeline{padding:0.4rem 0.8rem}
+.tl-item{display:flex;gap:0.5rem;padding:0.3rem 0;position:relative}
+.tl-item::before{content:'';position:absolute;left:6px;top:1.4rem;bottom:-0.3rem;width:1px;background:var(--border)}
+.tl-item:last-child::before{display:none}
+.tl-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;margin-top:0.1rem;display:flex;align-items:center;justify-content:center;font-size:0.45rem}
+.tl-dot.gateway{background:rgba(59,130,246,0.2);color:#60a5fa}
+.tl-dot.l1{background:rgba(245,158,11,0.2);color:#fbbf24}
+.tl-dot.l2{background:rgba(168,85,247,0.2);color:#c084fc}
+.tl-dot.l3{background:rgba(239,68,68,0.2);color:#f87171}
+.tl-dot.verdict{background:rgba(34,197,94,0.2);color:#4ade80}
+.tl-dot.verdict.bad{background:rgba(239,68,68,0.2);color:#f87171}
+.tl-dot.operator{background:rgba(168,85,247,0.2);color:#c084fc}
+.tl-content{flex:1;min-width:0}
+.tl-title{font-size:0.7rem;font-weight:600}
+.tl-detail{font-size:0.65rem;color:var(--text-dim);margin-top:0.05rem;word-break:break-word;white-space:pre-wrap}
+.tl-time{font-size:0.55rem;color:var(--text-dim)}
+
+/* Evidence */
+.evidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;margin-top:0.3rem}
+.evidence-item{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:0.4rem;font-size:0.65rem}
+.evidence-item h5{font-size:0.6rem;text-transform:uppercase;color:var(--text-dim);letter-spacing:0.5px;margin-bottom:0.2rem}
+.evidence-item .val{color:var(--text);font-weight:500}.evidence-item .val.bad{color:var(--red)}.evidence-item .val.good{color:var(--green)}
+.screenshot-thumb{max-width:100%;border-radius:3px;margin-top:0.2rem;border:1px solid var(--border)}
+
+/* Reasoning */
+.reasoning-block{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:0.5rem;margin-top:0.3rem;font-size:0.7rem;line-height:1.5;color:var(--text-dim);max-height:180px;overflow-y:auto;white-space:pre-wrap;font-family:'Consolas','Fira Code',monospace}
+
+/* Live Chain-of-Thought */
+.cot-container{margin-top:0.3rem}
+.cot-header{display:flex;align-items:center;gap:0.4rem;font-size:0.65rem;font-weight:600;color:var(--orange);margin-bottom:0.2rem}
+.cot-header .cot-indicator{width:7px;height:7px;border-radius:50%;background:var(--orange);animation:cot-blink 0.8s ease-in-out infinite}
+.cot-header .cot-indicator.done{background:var(--green);animation:none}
+.cot-header .cot-tokens{color:var(--text-dim);font-weight:400;margin-left:auto;font-size:0.55rem}
+.cot-block{background:linear-gradient(135deg,rgba(15,23,42,0.95),rgba(30,27,75,0.6));border:1px solid rgba(245,158,11,0.25);border-radius:6px;padding:0.5rem 0.6rem;font-size:0.65rem;line-height:1.6;color:#cbd5e1;max-height:250px;overflow-y:auto;white-space:pre-wrap;font-family:'Consolas','Fira Code',monospace;word-break:break-word;scroll-behavior:smooth}
+.cot-block.done{border-color:rgba(34,197,94,0.25)}
+.cot-cursor{display:inline-block;width:2px;height:0.85em;background:var(--orange);animation:cursor-blink 0.6s step-end infinite;vertical-align:text-bottom;margin-left:1px}
+@keyframes cot-blink{0%,100%{opacity:1}50%{opacity:0.3}}
+@keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* Stats */
+.stats-bar{display:flex;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.8rem;flex-wrap:wrap}
+.stat{text-align:center;flex:1;min-width:50px}
+.stat .num{font-size:1.2rem;font-weight:700}
+.stat .num.green{color:var(--green)}.stat .num.red{color:var(--red)}.stat .num.orange{color:var(--orange)}.stat .num.blue{color:var(--accent)}.stat .num.purple{color:var(--purple)}
+.stat .lbl{font-size:0.55rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px}
+
+/* Operator Panel */
+.op-card{background:var(--bg-card);border:1px solid var(--purple);border-left:3px solid var(--purple);border-radius:var(--radius);padding:0.8rem;margin-bottom:0.8rem}
+.op-card .op-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem}
+.op-card .op-subject{font-size:0.8rem;font-weight:600}
+.op-card .op-from{font-size:0.7rem;color:var(--text-dim)}
+.op-card .op-reasoning{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:0.4rem;font-size:0.65rem;color:var(--text-dim);max-height:100px;overflow-y:auto;margin:0.4rem 0;white-space:pre-wrap;font-family:'Consolas',monospace}
+.op-card .op-meta{font-size:0.6rem;color:var(--text-dim);margin-bottom:0.4rem}
+.op-card .op-actions{display:flex;gap:0.4rem;flex-wrap:wrap}
+
+/* Inbox */
+.inbox-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:0.7rem;margin-bottom:0.6rem;border-left:3px solid var(--green)}
+.inbox-card .inbox-from{font-size:0.75rem;font-weight:600}
+.inbox-card .inbox-subject{font-size:0.7rem;color:var(--text)}
+.inbox-card .inbox-summary{font-size:0.7rem;color:var(--accent2);margin:0.3rem 0;background:var(--bg);padding:0.4rem;border-radius:4px;border:1px solid var(--border)}
+.inbox-card .inbox-safety{font-size:0.6rem;color:var(--green)}
+.inbox-card .inbox-time{font-size:0.55rem;color:var(--text-dim)}
+
+.empty-state{text-align:center;padding:3rem 2rem;color:var(--text-dim)}
+.empty-state .icon{font-size:2.5rem;margin-bottom:0.4rem}
+
+/* Copy Button */
+.btn-copy{background:var(--bg);border:1px solid var(--border);color:var(--text-dim);padding:0.2rem 0.45rem;border-radius:4px;cursor:pointer;font-size:0.6rem;transition:all 0.2s;flex-shrink:0;margin-left:0.3rem}
+.btn-copy:hover{background:var(--bg-card2);color:var(--text);border-color:var(--accent)}
+.btn-copy.copied{background:rgba(34,197,94,0.15);color:var(--green);border-color:var(--green)}
+
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Toggle Switches */
+.toggles-panel{margin-bottom:1rem}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:0.3rem;transition:border-color 0.2s}
+.toggle-row.disabled{opacity:0.5;border-color:var(--border)}
+.toggle-row.enabled{border-color:color-mix(in srgb, var(--green) 40%, transparent)}
+.toggle-info{display:flex;align-items:center;gap:0.4rem}
+.toggle-label{font-size:0.7rem;font-weight:600}
+.toggle-desc{font-size:0.55rem;color:var(--text-dim)}
+.toggle-label.l1{color:#fbbf24}.toggle-label.l2{color:#c084fc}.toggle-label.l3{color:#f87171}
+
+.switch{position:relative;width:36px;height:20px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;inset:0;background:#334155;border-radius:20px;cursor:pointer;transition:0.2s}
+.switch .slider::before{content:'';position:absolute;width:16px;height:16px;left:2px;bottom:2px;background:#94a3b8;border-radius:50%;transition:0.2s}
+.switch input:checked+.slider{background:var(--green);box-shadow:0 0 8px rgba(34,197,94,0.3)}
+.switch input:checked+.slider::before{transform:translateX(16px);background:white}
+
+.active-combo{font-size:0.6rem;color:var(--text-dim);text-align:center;padding:0.2rem 0;margin-top:0.1rem}
+.active-combo strong{color:var(--accent2)}
+
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#128737; Detect Email</h1>
+  <p>AI-Powered Multi-Layer Phishing Defense System</p>
+</div>
+
+<div class="status-bar">
+  <div class="status-item"><span class="status-dot" id="dot-api"></span><span>API</span></div>
+  <div class="status-item"><span class="status-dot" id="dot-smtp"></span><span>SMTP</span></div>
+  <div class="status-item"><span class="status-dot loading" id="dot-l2"></span><span>L2 BERT</span></div>
+  <div class="status-item"><span class="status-dot loading" id="dot-l3"></span><span>L3 Judge</span></div>
+  <div class="status-item" id="ws-status"><span class="status-dot loading"></span><span>WS</span></div>
+</div>
+
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab('monitor')">&#128232; Monitor</div>
+  <div class="tab" onclick="switchTab('operator')">&#128100; Operator <span class="badge-count" id="op-badge" style="display:none">0</span></div>
+  <div class="tab" onclick="switchTab('inbox')">&#128229; User Inbox</div>
+</div>
+
+<div class="main-grid">
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <div class="section-title">&#9881; Pipeline</div>
+    <div class="pipeline-mini">
+      <div class="pipe-step gw"><div class="label">SMTP</div></div>
+      <div class="pipe-step l1" id="pipe-l1"><div class="label">L1</div></div>
+      <div class="pipe-step l2" id="pipe-l2"><div class="label">L2</div></div>
+      <div class="pipe-step l3" id="pipe-l3"><div class="label">L3</div></div>
+      <div class="pipe-step op"><div class="label">&#128100;</div></div>
+    </div>
+
+    <div class="section-title">&#128268; Protection Layers</div>
+    <div class="toggles-panel">
+      <div class="toggle-row enabled" id="row-L1">
+        <div class="toggle-info">
+          <div>
+            <div class="toggle-label l1">L1 — Threat Intel</div>
+            <div class="toggle-desc">URL/IP/domain reputation</div>
+          </div>
+        </div>
+        <label class="switch"><input type="checkbox" checked id="toggle-L1" onchange="toggleLayer('L1',this.checked)"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row enabled" id="row-L2">
+        <div class="toggle-info">
+          <div>
+            <div class="toggle-label l2">L2 — DistilBERT</div>
+            <div class="toggle-desc">Text classification</div>
+          </div>
+        </div>
+        <label class="switch"><input type="checkbox" checked id="toggle-L2" onchange="toggleLayer('L2',this.checked)"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row enabled" id="row-L3">
+        <div class="toggle-info">
+          <div>
+            <div class="toggle-label l3">L3 — DeepSeek Judge</div>
+            <div class="toggle-desc">LLM deep investigation</div>
+          </div>
+        </div>
+        <label class="switch"><input type="checkbox" checked id="toggle-L3" onchange="toggleLayer('L3',this.checked)"><span class="slider"></span></label>
+      </div>
+      <div class="active-combo" id="active-combo">Active: <strong>L1 + L2 + L3</strong> (full protection)</div>
+    </div>
+
+    <div class="section-title">&#128269; Send Test Email</div>
+    <div class="form-group"><label>From</label><input type="text" id="in-sender" placeholder="attacker@evil.xyz"></div>
+    <div class="form-group"><label>To</label><input type="text" id="in-recipient" placeholder="victim@company.com"></div>
+    <div class="form-group"><label>Subject</label><input type="text" id="in-subject" placeholder="Urgent: Verify account"></div>
+    <div class="form-group"><label>Body</label><textarea id="in-body" rows="3" placeholder="Email body..."></textarea></div>
+    <div class="form-group"><label>URLs (one per line)</label><textarea id="in-urls" rows="2" placeholder="http://phishing-site.xyz"></textarea></div>
+
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.8rem">
+      <button class="btn btn-primary" id="btn-send" onclick="sendTestEmail()">&#9889; Analyze</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('phish_l1')">L1</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('phish_l2')">L2&#128308;</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('safe')">Safe</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('grey')">Grey</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('qr')">QR</button>
+    </div>
+
+    <div class="section-title">&#128279; Links</div>
+    <div style="display:flex;flex-direction:column;gap:0.2rem;font-size:0.75rem">
+      <a href="/docs" target="_blank" style="color:var(--accent);text-decoration:none">Swagger UI</a>
+      <a href="/api/v1/operator/pending" target="_blank" style="color:var(--accent);text-decoration:none">Operator Queue (JSON)</a>
+      <a href="/api/v1/inbox" target="_blank" style="color:var(--accent);text-decoration:none">User Inbox (JSON)</a>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <!-- TAB: Monitor -->
+    <div class="tab-content active" id="tab-monitor">
+      <div class="stats-bar">
+        <div class="stat"><div class="num blue" id="stat-total">0</div><div class="lbl">Total</div></div>
+        <div class="stat"><div class="num green" id="stat-safe">0</div><div class="lbl">Safe</div></div>
+        <div class="stat"><div class="num red" id="stat-phish">0</div><div class="lbl">Phishing</div></div>
+        <div class="stat"><div class="num orange" id="stat-grey">0</div><div class="lbl">Grey→L3</div></div>
+        <div class="stat"><div class="num purple" id="stat-operator">0</div><div class="lbl">Operator</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+        <div class="section-title" style="margin:0">Live Processing Feed</div>
+        <button class="btn btn-secondary btn-sm" onclick="clearFeed()">Clear</button>
+      </div>
+      <div id="feed-container">
+        <div class="empty-state" id="empty-state"><div class="icon">&#128232;</div><p>Waiting for emails...<br><span style="font-size:0.75rem">Send a test or run <code>python smtp_bombardier.py</code></span></p></div>
+      </div>
+    </div>
+
+    <!-- TAB: Operator -->
+    <div class="tab-content" id="tab-operator">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
+        <div class="section-title" style="margin:0">&#128100; Operator Review Queue</div>
+        <div style="display:flex;gap:0.4rem">
+          <button class="btn btn-secondary btn-sm" onclick="loadOperatorQueue()">Refresh</button>
+          <button class="btn btn-purple btn-sm" id="btn-retrain" onclick="triggerRetrain()">&#129504; Retrain L2</button>
+        </div>
+      </div>
+      <div id="op-info" style="font-size:0.7rem;color:var(--text-dim);margin-bottom:0.8rem">
+        Operator decisions: <span id="op-decisions-count">0</span> / 10 needed for retraining
+      </div>
+      <div id="op-container">
+        <div class="empty-state"><div class="icon">&#9989;</div><p>No emails pending review</p></div>
+      </div>
+    </div>
+
+    <!-- TAB: User Inbox -->
+    <div class="tab-content" id="tab-inbox">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
+        <div class="section-title" style="margin:0">&#128229; User Inbox (Delivered Emails)</div>
+        <button class="btn btn-secondary btn-sm" onclick="loadInbox()">Refresh</button>
+      </div>
+      <div id="inbox-container">
+        <div class="empty-state"><div class="icon">&#128229;</div><p>No delivered emails yet</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══ State ═══
+let stats = {total:0, safe:0, phish:0, grey:0, operator:0};
+let ws = null;
+
+// ═══ Tabs ═══
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelectorAll('.tab')[{monitor:0,operator:1,inbox:2}[name]].classList.add('active');
+  if (name === 'operator') loadOperatorQueue();
+  if (name === 'inbox') loadInbox();
+}
+
+// ═══ WebSocket ═══
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen = () => { document.getElementById('ws-status').innerHTML = '<span class="status-dot"></span><span>Live</span>'; };
+  ws.onclose = () => { document.getElementById('ws-status').innerHTML = '<span class="status-dot error"></span><span>WS</span>'; setTimeout(connectWS, 3000); };
+  ws.onerror = () => {};
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'history') msg.events.forEach(ev => handleEvent(ev));
+    else handleEvent(msg);
+  };
+}
+connectWS();
+
+// ═══ Event Handler ═══
+function handleEvent(ev) {
+  const eid = ev.email_id;
+  if (!eid) return;
+  switch (ev.type) {
+    case 'email_received': createEmailCard(eid, ev.data); stats.total++; break;
+    case 'layer_start': addTL(eid, ev.layer, `${ev.layer} starting...`, ev.data.message, 'processing'); break;
+    case 'layer_result': addTL(eid, ev.layer, `${ev.layer} complete`, fmtLayer(ev.layer, ev.data)); if(ev.data.zone==='grey') stats.grey++; break;
+    case 'l3_step': addTL(eid, 'L3', ev.data.step, ev.data.message); break;
+    case 'l3_evidence': addEvidence(eid, ev.data); break;
+    case 'l3_cot_token': addCoTToken(eid, ev.data); break;
+    case 'l3_judge_verdict': addJudge(eid, ev.data); break;
+    case 'final_verdict': finalizeCard(eid, ev.data); if(['DELIVER','RELEASE'].includes(ev.data.action)) stats.safe++; else if(ev.data.action==='OPERATOR_REVIEW') stats.operator++; else stats.phish++; break;
+    case 'inbox_update': /* auto-refresh if on inbox tab */ break;
+    case 'operator_decision': /* refresh operator tab */ break;
+    case 'layer_toggle': if(ev.data&&ev.data.layers) syncToggles(ev.data.layers); break;
+  }
+  updateStats();
+}
+
+function fmtLayer(layer, d) {
+  if (layer === 'L1') return `Verdict: ${d.verdict} | Checks: ${d.checks_count} | Malicious: ${d.malicious_count}` + (d.results ? '\n' + d.results.map(r => `  ${r.source}: ${r.detail}`).join('\n') : '');
+  if (layer === 'L2') { const i = d.zone==='safe'?'✅':d.zone==='phishing'?'❌':'⚠️'; return `${i} ${d.label} (safe:${d.safe_pct}% phish:${d.phish_pct}%) → ${d.zone.toUpperCase()}`; }
+  return JSON.stringify(d);
+}
+
+function createEmailCard(eid, d) {
+  document.getElementById('empty-state')?.remove();
+  const card = document.createElement('div');
+  card.className = 'email-card processing'; card.id = `card-${eid}`;
+  card.innerHTML = `<div class="email-header" onclick="toggleCard('${eid}')"><div class="email-meta"><div class="email-from">📧 ${esc(d.sender||'unknown')}</div><div class="email-subject">${esc(d.subject||'(no subject)')}</div></div><button class="btn-copy" onclick="event.stopPropagation();copyCard('${eid}')" title="Copy analysis to clipboard">📋 Copy</button><span class="email-badge badge-processing" id="badge-${eid}"><span class="spinner"></span> Processing</span></div><div class="email-body open" id="body-${eid}"><div class="timeline" id="tl-${eid}"></div></div>`;
+  const c = document.getElementById('feed-container');
+  c.insertBefore(card, c.firstChild);
+  const layerInfo = d.active_layers ? `\nActive layers: ${d.active_layers.join(' → ')}` : '';
+  addTL(eid,'gateway','Email received',`From: ${d.sender}\nTo: ${d.recipient}\nSubject: ${d.subject}\nURLs: ${d.urls_count}${layerInfo}` + (d.body_preview ? `\n\n"${d.body_preview}..."` : ''));
+}
+
+function addTL(eid, layer, title, detail) {
+  const tl = document.getElementById(`tl-${eid}`); if (!tl) return;
+  const dc = layer.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const item = document.createElement('div'); item.className = 'tl-item';
+  item.innerHTML = `<div class="tl-dot ${dc}">●</div><div class="tl-content"><div class="tl-title">${title}</div><div class="tl-detail">${esc(detail||'')}</div><div class="tl-time">${new Date().toLocaleTimeString()}</div></div>`;
+  tl.appendChild(item);
+}
+
+function addEvidence(eid, d) {
+  const tl = document.getElementById(`tl-${eid}`); if(!tl) return;
+  let h = `<div class="tl-item"><div class="tl-dot l3">🔍</div><div class="tl-content"><div class="tl-title">Evidence: ${esc(d.url||'')}</div><div class="evidence-grid">`;
+  if(d.whois){const age=d.whois.domain_age_days;const ac=age>=0&&age<90?'bad':'good';h+=`<div class="evidence-item"><h5>🌐 WHOIS</h5><div>Registrar: <span class="val">${esc(d.whois.registrar||'N/A')}</span></div><div>Age: <span class="val ${ac}">${age>=0?age+' days':'N/A'}</span></div><div>Country: <span class="val">${esc(d.whois.country||'N/A')}</span></div></div>`;}
+  if(d.ssl){const vc=d.ssl.is_valid?'good':'bad';h+=`<div class="evidence-item"><h5>🔒 SSL</h5><div>Issuer: <span class="val">${esc(d.ssl.issuer||'N/A')}</span></div><div>Valid: <span class="val ${vc}">${d.ssl.is_valid?'Yes':'No'}</span></div></div>`;}
+  if(d.dom){const pc=d.dom.password_fields?'bad':'good';h+=`<div class="evidence-item"><h5>📄 DOM</h5><div>Forms: ${d.dom.forms}</div><div>Password: <span class="val ${pc}">${d.dom.password_fields?'YES ⚠':'No'}</span></div><div>Scripts: ${d.dom.external_scripts}</div><div>Iframes: ${d.dom.iframes}</div></div>`;}
+  h+=`<div class="evidence-item"><h5>🏆 Tranco</h5><div class="val ${d.tranco_rank?'good':'bad'}">${d.tranco_rank?'#'+d.tranco_rank:'NOT IN TOP 1M ⚠'}</div></div>`;
+  h+=`</div>`;
+  if(d.screenshot_b64) h+=`<img class="screenshot-thumb" src="data:image/png;base64,${d.screenshot_b64}" alt="Screenshot">`;
+  h+=`<div class="tl-time">${new Date().toLocaleTimeString()}</div></div></div>`;
+  tl.insertAdjacentHTML('beforeend',h);
+}
+
+function addCoTToken(eid, d) {
+  const tl = document.getElementById(`tl-${eid}`); if (!tl) return;
+  let container = document.getElementById(`cot-wrap-${eid}`);
+  if (!container) {
+    // Create the CoT block on first token
+    const item = document.createElement('div');
+    item.className = 'tl-item';
+    item.id = `cot-wrap-${eid}`;
+    item.innerHTML = `<div class="tl-dot l3">&#129504;</div><div class="tl-content"><div class="cot-container"><div class="cot-header"><span class="cot-indicator" id="cot-ind-${eid}"></span><span>Chain-of-Thought (live)</span><span class="cot-tokens" id="cot-count-${eid}">0 tokens</span></div><div class="cot-block" id="cot-${eid}"><span id="cot-text-${eid}"></span><span class="cot-cursor" id="cot-cursor-${eid}"></span></div></div></div>`;
+    tl.appendChild(item);
+  }
+  const textEl = document.getElementById(`cot-text-${eid}`);
+  const countEl = document.getElementById(`cot-count-${eid}`);
+  const blockEl = document.getElementById(`cot-${eid}`);
+  const indEl = document.getElementById(`cot-ind-${eid}`);
+  const cursorEl = document.getElementById(`cot-cursor-${eid}`);
+  if (textEl) textEl.textContent += d.token;
+  if (countEl) countEl.textContent = (d.token_count||0) + ' tokens';
+  if (blockEl) blockEl.scrollTop = blockEl.scrollHeight;
+  if (d.done) {
+    if (indEl) indEl.classList.add('done');
+    if (blockEl) blockEl.classList.add('done');
+    if (cursorEl) cursorEl.remove();
+    const header = indEl?.parentElement;
+    if (header) header.querySelector('span:nth-child(2)').textContent = 'Chain-of-Thought (complete)';
+  }
+}
+
+function addJudge(eid, d) {
+  const tl = document.getElementById(`tl-${eid}`); if(!tl) return;
+  const isPhish = d.verdict==='phishing'; const isUncertain = d.verdict==='uncertain';
+  const icon = isPhish?'❌':isUncertain?'❓':'✅';
+  const color = isPhish?'var(--red)':isUncertain?'var(--purple)':'var(--green)';
+  const label = isUncertain?'UNCERTAIN → OPERATOR':d.verdict.toUpperCase();
+  let h = `<div class="tl-item"><div class="tl-dot ${isPhish?'verdict bad':isUncertain?'operator':'verdict'}">⚖</div><div class="tl-content"><div class="tl-title" style="color:${color}">${icon} DeepSeek Judge: ${label} (${(d.confidence*100).toFixed(0)}%)</div>`;
+  if(d.reasoning) h+=`<div class="reasoning-block">${esc(d.reasoning)}</div>`;
+  h+=`<div class="tl-time">${new Date().toLocaleTimeString()}</div></div></div>`;
+  tl.insertAdjacentHTML('beforeend',h);
+}
+
+function finalizeCard(eid, d) {
+  const card = document.getElementById(`card-${eid}`);
+  const badge = document.getElementById(`badge-${eid}`);
+  if(!card||!badge) return;
+  card.classList.remove('processing');
+  const a = d.action;
+  if(['DELIVER','RELEASE'].includes(a)){card.classList.add('verdict-safe');badge.className='email-badge badge-deliver';badge.innerHTML=a==='DELIVER'?'✅ DELIVER':'✅ RELEASE';}
+  else if(a==='OPERATOR_REVIEW'){card.classList.add('verdict-operator');badge.className='email-badge badge-operator_review';badge.innerHTML='👤 OPERATOR';}
+  else{card.classList.add('verdict-phishing');badge.className=`email-badge badge-${a.toLowerCase()}`;badge.innerHTML=a==='REJECT'?'❌ REJECT':'🗑️ DELETE';}
+  addTL(eid,d.stopped_at||'',`Final: ${a}`,`${d.detail}\nTime: ${d.elapsed}s`);
+}
+
+function toggleCard(eid){const b=document.getElementById(`body-${eid}`);if(b)b.classList.toggle('open');}
+function updateStats(){document.getElementById('stat-total').textContent=stats.total;document.getElementById('stat-safe').textContent=stats.safe;document.getElementById('stat-phish').textContent=stats.phish;document.getElementById('stat-grey').textContent=stats.grey;document.getElementById('stat-operator').textContent=stats.operator;}
+function clearFeed(){document.getElementById('feed-container').innerHTML=`<div class="empty-state" id="empty-state"><div class="icon">📧</div><p>Waiting for emails...</p></div>`;stats={total:0,safe:0,phish:0,grey:0,operator:0};updateStats();}
+
+// ═══ Health ═══
+async function checkHealth(){
+  try{const r=await fetch('/health');const d=await r.json();
+  document.getElementById('dot-api').className='status-dot';document.getElementById('dot-smtp').className='status-dot';
+  document.getElementById('dot-l2').className=d.l2_loaded?'status-dot':'status-dot loading';
+  document.getElementById('dot-l3').className=d.l3_loaded?'status-dot':'status-dot loading';
+  if(d.operator_pending>0){document.getElementById('op-badge').style.display='';document.getElementById('op-badge').textContent=d.operator_pending;}else{document.getElementById('op-badge').style.display='none';}
+  document.getElementById('op-decisions-count').textContent=d.operator_decisions||0;
+  if(d.layers) syncToggles(d.layers);
+  }catch(e){document.getElementById('dot-api').className='status-dot error';}
+}
+checkHealth();setInterval(checkHealth,10000);
+
+// ═══ Operator Panel ═══
+async function loadOperatorQueue(){
+  try{const r=await fetch('/api/v1/operator/pending');const d=await r.json();
+  const c=document.getElementById('op-container');
+  if(!d.items||d.items.length===0){c.innerHTML='<div class="empty-state"><div class="icon">✅</div><p>No emails pending review</p></div>';return;}
+  c.innerHTML=d.items.map(it=>{
+    const copyData=`From: ${it.sender}\\nTo: ${it.recipient}\\nSubject: ${it.subject}\\nL2: ${(it.l2_confidence*100).toFixed(1)}%\\nL3: ${(it.l3_confidence*100).toFixed(0)}%\\nEvidence: ${it.evidence_summary||'N/A'}\\nBody: ${(it.body_preview||'').substring(0,200)}\\nReasoning: ${it.l3_reasoning||'N/A'}`;
+    return `<div class="op-card"><div class="op-header"><div><div class="op-subject">${esc(it.subject)}</div><div class="op-from">From: ${esc(it.sender)} → ${esc(it.recipient)}</div></div><button class="btn-copy" onclick="copyText(decodeURI('${encodeURI(copyData)}'),this)" title="Copy analysis">📋 Copy</button></div><div class="op-meta">L2 confidence: ${(it.l2_confidence*100).toFixed(1)}% | L3 confidence: ${(it.l3_confidence*100).toFixed(0)}% | ${it.evidence_summary||'No evidence'}</div>${it.body_preview?`<div style="font-size:0.65rem;color:var(--text-dim);margin-bottom:0.3rem;max-height:60px;overflow:hidden">"${esc(it.body_preview)}"</div>`:''}${it.l3_reasoning?`<div class="op-reasoning">${esc(it.l3_reasoning)}</div>`:''}<div class="op-actions"><button class="btn btn-green btn-sm" onclick="operatorDecide('${it.email_id}','safe')">✅ Safe</button><button class="btn btn-danger btn-sm" onclick="operatorDecide('${it.email_id}','phishing')">🚫 Phishing</button></div></div>`;
+  }).join('');}catch(e){console.error(e);}
+}
+
+async function operatorDecide(emailId, label){
+  try{const r=await fetch('/api/v1/operator/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email_id:emailId,operator_label:label,comment:'Operator decision via dashboard'})});
+  const d=await r.json();if(d.status==='ok'){loadOperatorQueue();checkHealth();}}catch(e){console.error(e);}
+}
+
+async function triggerRetrain(){
+  const btn=document.getElementById('btn-retrain');btn.disabled=true;btn.textContent='Training...';
+  try{const r=await fetch('/api/v1/operator/retrain',{method:'POST'});const d=await r.json();
+  alert(d.message||d.error||JSON.stringify(d));}catch(e){alert('Error: '+e);}finally{btn.disabled=false;btn.textContent='🧠 Retrain L2';}
+}
+
+// ═══ User Inbox ═══
+async function loadInbox(){
+  try{const r=await fetch('/api/v1/inbox');const d=await r.json();
+  const c=document.getElementById('inbox-container');
+  if(!d.items||d.items.length===0){c.innerHTML='<div class="empty-state"><div class="icon">📩</div><p>No delivered emails yet</p></div>';return;}
+  c.innerHTML=d.items.map(it=>{
+    const act = it.action||'';
+    const layerBadge = act==='RELEASE'?'<span style="display:inline-block;background:rgba(248,113,113,0.15);color:#f87171;font-size:0.55rem;padding:0.1rem 0.35rem;border-radius:4px;margin-left:0.3rem;font-weight:600">via L3 Judge</span>':act==='DELIVER'?'<span style="display:inline-block;background:rgba(192,132,252,0.15);color:#c084fc;font-size:0.55rem;padding:0.1rem 0.35rem;border-radius:4px;margin-left:0.3rem;font-weight:600">via L2 Classifier</span>':'';
+    const inboxCopy=`From: ${it.sender}\nSubject: ${it.subject}\nSummary: ${it.summary||'N/A'}\nSafety: ${it.safety_note||''}\nAction: ${act}`;
+    return `<div class="inbox-card"><div style="display:flex;justify-content:space-between;align-items:center"><div class="inbox-from">${esc(it.sender)}${layerBadge}</div><div style="display:flex;align-items:center;gap:0.3rem"><button class="btn-copy" onclick="copyText(\`${inboxCopy.replace(/`/g,'\\`')}\`,this)" title="Copy">📋</button><div class="inbox-time">${it.timestamp?new Date(it.timestamp*1000).toLocaleString():''}</div></div></div><div class="inbox-subject">${esc(it.subject)}</div>${it.summary?`<div class="inbox-summary">📝 AI Summary: ${esc(it.summary)}</div>`:''}<div class="inbox-safety">${esc(it.safety_note)}</div></div>`;
+  }).join('');}catch(e){console.error(e);}
+}
+
+// ═══ Layer Toggles ═══
+async function toggleLayer(layer, enabled) {
+  try {
+    const r = await fetch('/api/v1/layers', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({layer, enabled}),
+    });
+    const d = await r.json();
+    if (d.layers) syncToggles(d.layers);
+  } catch(e) { console.error('Toggle failed:', e); }
+}
+
+function syncToggles(layers) {
+  ['L1','L2','L3'].forEach(l => {
+    const on = layers[l];
+    const cb = document.getElementById('toggle-' + l);
+    const row = document.getElementById('row-' + l);
+    const pipe = document.getElementById('pipe-' + l.toLowerCase());
+    if (cb) cb.checked = on;
+    if (row) { row.classList.toggle('enabled', on); row.classList.toggle('disabled', !on); }
+    if (pipe) pipe.style.opacity = on ? '1' : '0.3';
+  });
+  // Update combo text
+  const active = ['L1','L2','L3'].filter(l => layers[l]);
+  const el = document.getElementById('active-combo');
+  if (active.length === 3) el.innerHTML = 'Active: <strong>L1 + L2 + L3</strong> (full protection)';
+  else if (active.length === 0) el.innerHTML = 'Active: <strong>None</strong> (no protection — all emails pass)';
+  else {
+    const descs = {L1:'Threat Intel',L2:'Classifier',L3:'Judge'};
+    el.innerHTML = 'Active: <strong>' + active.join(' + ') + '</strong> (' + active.map(l=>descs[l]).join(' → ') + ')';
+  }
+}
+
+// ═══ Examples ═══
+const examples={
+  phish_l1:{sender:'security@acc0unt-verify.xyz',recipient:'victim@company.com',subject:'Verify your credentials',body:'We detected unusual activity. Verify now: http://acc0unt-verify.xyz/login',urls:'http://acc0unt-verify.xyz/login'},
+  phish_l2:{sender:'ceo@urgent-wire.biz',recipient:'finance@company.com',subject:'Wire Transfer Needed - CONFIDENTIAL',body:'I need you to process an urgent wire transfer of $45,000. This is confidential. Bank: First National, Account: 3847291056. Complete within 2 hours.',urls:''},
+  safe:{sender:'alex@company.com',recipient:'team@company.com',subject:'Meeting notes from standup',body:'Hi team, here are the notes from today: Backend API on track, Frontend redesign complete, QA starts testing tomorrow. Sprint planning Monday 10 AM.',urls:''},
+  grey:{sender:'noreply@delivery-notification.net',recipient:'user@company.com',subject:'Подтвердите получение посылки',body:'Ваша посылка #38291 ожидает подтверждения. Подтвердите: http://delivery-notification.net/confirm?id=38291',urls:'http://delivery-notification.net/confirm?id=38291'},
+  qr:{sender:'it-security@company-portal.xyz',recipient:'employee@company.com',subject:'Mandatory 2FA Setup — Scan QR Code',body:'All employees must enable 2FA. Scan the QR code: [QR CODE: http://company-portal.xyz/qr/2fa-setup.png] Enter your corporate username and password after scanning. Deadline: March 1.',urls:'http://company-portal.xyz/qr/2fa-setup.png'},
+};
+function loadExample(t){const e=examples[t];if(!e)return;document.getElementById('in-sender').value=e.sender;document.getElementById('in-recipient').value=e.recipient;document.getElementById('in-subject').value=e.subject;document.getElementById('in-body').value=e.body;document.getElementById('in-urls').value=e.urls;}
+
+// ═══ Send ═══
+async function sendTestEmail(){
+  const s=document.getElementById('in-sender').value,r=document.getElementById('in-recipient').value,su=document.getElementById('in-subject').value,b=document.getElementById('in-body').value,u=document.getElementById('in-urls').value;
+  if(!b&&!su)return;
+  const urls=u.split('\n').map(x=>x.trim()).filter(Boolean);
+  const domains=[...new Set(urls.map(x=>{try{return new URL(x).hostname}catch{return''}}).filter(Boolean))];
+  const btn=document.getElementById('btn-send');btn.disabled=true;
+  try{await fetch('/api/v1/process',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:s,recipient:r,subject:su,body:b,urls,domains,ips:[],message_id:'',html_body:'',raw:''})});}catch(e){console.error(e);}finally{btn.disabled=false;}
+}
+
+// ═══ Copy to clipboard ═══
+function copyCard(eid) {
+  const card = document.getElementById(`card-${eid}`);
+  if (!card) return;
+  // Collect text from the card header + timeline
+  const from = card.querySelector('.email-from')?.textContent || '';
+  const subj = card.querySelector('.email-subject')?.textContent || '';
+  const badge = card.querySelector('.email-badge')?.textContent || '';
+  const tl = card.querySelector('.timeline');
+  let lines = [`From: ${from}`, `Subject: ${subj}`, `Verdict: ${badge}`, ''];
+  if (tl) {
+    tl.querySelectorAll('.tl-item').forEach(item => {
+      const title = item.querySelector('.tl-title')?.textContent || '';
+      const detail = item.querySelector('.tl-detail')?.textContent || '';
+      const time = item.querySelector('.tl-time')?.textContent || '';
+      lines.push(`[${time}] ${title}`);
+      if (detail) lines.push(`  ${detail}`);
+    });
+  }
+  // Include evidence & reasoning if present
+  card.querySelectorAll('.evidence-item').forEach(e => {
+    lines.push(`  ${e.textContent.trim().replace(/\s+/g, ' ')}`);
+  });
+  card.querySelectorAll('.reasoning-block').forEach(r => {
+    lines.push(`\nJudge Reasoning:\n${r.textContent}`);
+  });
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = card.querySelector('.btn-copy');
+    if (btn) { btn.classList.add('copied'); btn.textContent = '✅ Copied'; setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '📋 Copy'; }, 2000); }
+  }).catch(e => { console.error('Copy failed:', e); alert('Copy failed. Try selecting text manually.'); });
+}
+
+function copyText(text, btnEl) {
+  navigator.clipboard.writeText(text).then(() => {
+    if (btnEl) { const orig = btnEl.textContent; btnEl.classList.add('copied'); btnEl.textContent = '✅'; setTimeout(() => { btnEl.classList.remove('copied'); btnEl.textContent = orig; }, 1500); }
+  }).catch(e => console.error('Copy failed:', e));
+}
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+</script>
+</body>
+</html>

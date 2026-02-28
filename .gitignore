@@ -1,0 +1,53 @@
+# Models and datasets (large files)
+models/
+datasets/
+*.gguf
+*.safetensors
+*.bin
+*.h5
+*.ot
+*.msgpack
+
+# Environment
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (operator decisions, inbox)
+data/
+
+# Logs
+*.log
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Images (test screenshots etc.)
+*.jpg
+*.png
+
+# Generated graphics / notebook outputs
+results_graphics/
+.ipynb_checkpoints/
+
+# others 
+*.txt
+!requirements.txt
+*.ipynb
+*.docx
+PLAN.md
+diploma_description.md
