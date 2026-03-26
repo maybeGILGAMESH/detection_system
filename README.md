@@ -1,9 +1,10 @@
 # Detect Email -- AI Phishing Defense System
 
 Multi-layer AI cascade for detecting phishing emails in real time.
-The system combines threat intelligence, a fine-tuned DistilBERT classifier,
-and a DeepSeek-R1 14B large language model to analyse incoming mail,
-escalating uncertain cases to a human operator.
+The system combines threat intelligence, a fine-tuned multilingual
+DistilBERT classifier, and a DeepSeek-R1 14B large language model
+to analyse incoming mail (English and Russian), escalating uncertain
+cases to a human operator.
 
 ## Architecture
 
@@ -18,7 +19,7 @@ Incoming email (SMTP, port 1025)
    |                     (shared httpx client, TTL cache)
    |   REJECT if known malicious
    |
-   L2  Classifier    ── DistilBERT binary classifier (safe / phishing)
+   L2  Classifier    ── DistilBERT multilingual classifier (safe / phishing)
    |                     temperature-scaled confidence, thread-offloaded
    |   DELIVER if safe  |  REJECT if phishing
    |
@@ -48,11 +49,11 @@ L2+L3, all three, etc.).
 
 | Component             | VRAM             |
 | --------------------- | ---------------- |
-| L2 DistilBERT         | ~270 MB          |
+| L2 DistilBERT (multilingual) | ~500 MB   |
 | L3 DeepSeek-R1 14B Q8 | ~14.2 GB         |
 | KV cache (4096 ctx)   | ~384 MB          |
 | Playwright / other    | ~200 MB          |
-| **Total**             | **~15 GB**       |
+| **Total**             | **~15.3 GB**     |
 
 ## Project structure
 
@@ -104,20 +105,49 @@ detect_email/
             prompts.py       -- System prompt + CoT template (incl. QR)
             router.py
     models/
-        distilbert-base/     -- Base DistilBERT (HuggingFace)
-        l2_finetuned/        -- Fine-tuned L2 checkpoint
-        deepseek-r1-14b-gguf/-- GGUF quantised DeepSeek-R1 14B Q8_0
+        distilbert-base-multilingual-cased/  -- Base multilingual DistilBERT
+        l2_finetuned/                        -- Fine-tuned L2 checkpoint
+        deepseek-r1-14b-gguf/                -- GGUF quantised DeepSeek-R1 14B Q8_0
     datasets/
-        phishtank.csv        -- PhishTank URL feed
-        top-1m.csv           -- Tranco Top 1M domains
-        enron/emails.csv     -- Safe email corpus (training)
-        phishing_emails/     -- Phishing corpus (training)
+        phishtank.csv                        -- PhishTank URL feed (L1)
+        top-1m.csv                           -- Tranco Top 1M domains (L1)
+        dataset_full.csv                     -- URL features dataset (L1)
+        enron/emails.csv                     -- Safe email corpus (L2 train)
+        phishing_emails/Phishing_Email.csv   -- Phishing corpus (L2 train)
+        russian-spam-detection/              -- RU spam/ham parquet (L2 train)
+        telegram_spam_cleaned.csv            -- RU Telegram spam (L2 train)
     tests/
     debug_screenshots/       -- Full PNG captures saved during L3
     smtp_bombardier.py       -- Test email sender (48 scenarios)
     test_all_levels.py       -- HTTP-based integration tests
     requirements.txt
 ```
+
+## Datasets
+
+### Text datasets (L2 -- DistilBERT training)
+
+Used to fine-tune `distilbert-base-multilingual-cased` for binary
+classification: 0 = safe, 1 = phishing/spam.
+
+| Dataset | File | Size | Rows | Lang | Labels |
+| ------- | ---- | ---- | ---- | ---- | ------ |
+| Phishing Email (Kaggle) | `phishing_emails/Phishing_Email.csv` | 50 MB | 18 650 | EN | safe 11 322 / phishing 7 328 |
+| Enron Emails (Kaggle/CMU) | `enron/emails.csv` | 1.4 GB | ~500K (10K used) | EN | all safe |
+| Russian Spam Detection (HF, gated) | `russian-spam-detection/processed_combined.parquet` | 458 MB | 4.5M (30K sampled) | RU | ham 4.16M / spam 347K |
+| Telegram Spam | `telegram_spam_cleaned.csv` | 77 KB | 199 | RU | spam only (supplement) |
+
+All four datasets are loaded automatically by `train.py`.
+Russian Spam Detection is sampled to 30 000 (15K spam + 15K safe) for
+class balance. Enron is limited to 10 000 rows.
+
+### URL / reputation datasets (L1 -- Threat Intel)
+
+| Dataset | File | Size | Rows | Used for |
+| ------- | ---- | ---- | ---- | -------- |
+| URL Features | `dataset_full.csv` | 24 MB | 88 647 | URL scoring (111 numeric features) |
+| PhishTank | `phishtank.csv` | 11 MB | 56 052 | URL blocklist |
+| Tranco Top-1M | `top-1m.csv` | 22 MB | 1 000 000 | URL whitelist |
 
 ## Setup
 
@@ -157,8 +187,9 @@ playwright install chromium
 6. Download models:
 
 ```bash
-# DistilBERT base
-huggingface-cli download distilbert-base-uncased --local-dir ./models/distilbert-base
+# DistilBERT base (multilingual)
+huggingface-cli download distilbert/distilbert-base-multilingual-cased \
+    --local-dir ./models/distilbert-base-multilingual-cased
 
 # DeepSeek-R1 14B GGUF (Q8_0 quantisation)
 huggingface-cli download bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF \
@@ -169,6 +200,20 @@ huggingface-cli download bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF \
 7. Download datasets:
 
 ```bash
+# Phishing Email (Kaggle)
+kaggle datasets download -d subhajournal/phishingemails \
+    -p ./datasets/phishing_emails --unzip
+
+# Enron Emails (Kaggle)
+kaggle datasets download -d wcukierski/enron-email-dataset \
+    -p ./datasets/enron --unzip
+
+# Russian Spam Detection (HuggingFace, gated -- requires HF_TOKEN)
+export HF_TOKEN=<your_token>
+huggingface-cli download ruSpamModels/russian-spam-detection \
+    --repo-type dataset \
+    --local-dir ./datasets/russian-spam-detection
+
 # PhishTank (requires free API key)
 wget -O datasets/phishtank.csv \
     "http://data.phishtank.com/data/<YOUR_KEY>/online-valid.csv"
@@ -189,7 +234,10 @@ OPERATOR_API_KEY=<any secret string for API auth>
 9. Fine-tune L2 classifier (first time only):
 
 ```bash
-python -m app.l2_classifier.train
+python -m app.l2_classifier.train \
+    --dataset_path ./datasets \
+    --output_dir ./models/l2_finetuned \
+    --epochs 3
 ```
 
 ## Running
@@ -323,7 +371,7 @@ placed in the operator review queue. The operator can:
 ## Technologies
 
 - **Web**: FastAPI, uvicorn, aiosmtpd, pydantic-settings
-- **ML**: PyTorch, HuggingFace Transformers (DistilBERT)
+- **ML**: PyTorch, HuggingFace Transformers (DistilBERT multilingual-cased)
 - **LLM**: llama-cpp-python with CUDA (DeepSeek-R1 14B GGUF Q8_0)
 - **Browser**: Playwright (headless Chromium) -- screenshots, DOM analysis
 - **QR**: Pillow, pyzbar (libzbar0), qrcode

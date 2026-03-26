@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     abuseipdb_api_key: str = ""
 
     # Model paths
-    distilbert_model_path: str = "./models/distilbert-base"
+    distilbert_model_path: str = "./models/distilbert-base-multilingual-cased"
     l2_finetuned_model_path: str = "./models/l2_finetuned"
     deepseek_model_path: str = "./models/deepseek-r1-14b"
     deepseek_gguf_path: str = (

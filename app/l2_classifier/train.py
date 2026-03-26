@@ -1,6 +1,6 @@
 """Training script for L2 DistilBERT classifier.
 
-Fine-tunes distilbert-base-uncased on phishing email dataset.
+Fine-tunes distilbert-base-multilingual-cased on phishing email dataset.
 Run standalone:
     python -m app.l2_classifier.train
 """
@@ -133,7 +133,7 @@ def load_data(dataset_path: str) -> tuple[list[str], list[int]]:
 
 def train(
     dataset_path: str = "./datasets",
-    model_name: str = "./models/distilbert-base",
+    model_name: str = "./models/distilbert-base-multilingual-cased",
     output_dir: str = "./models/l2_finetuned",
     epochs: int = 3,
     batch_size: int = 16,
@@ -228,7 +228,7 @@ def incremental_train(csv_path: str, output_dir: str = "./models/l2_finetuned"):
     labels = df["label"].tolist()
 
     # Load the existing fine-tuned model (not base)
-    model_path = output_dir if Path(output_dir).exists() else "./models/distilbert-base"
+    model_path = output_dir if Path(output_dir).exists() else "./models/distilbert-base-multilingual-cased"
     logger.info("Loading model from %s for incremental training", model_path)
 
     tokenizer = DistilBertTokenizer.from_pretrained(model_path)
@@ -290,7 +290,7 @@ def incremental_train(csv_path: str, output_dir: str = "./models/l2_finetuned"):
 def main():
     parser = argparse.ArgumentParser(description="Train L2 DistilBERT phishing classifier")
     parser.add_argument("--dataset_path", default="./datasets", help="Path to datasets directory")
-    parser.add_argument("--model_name", default="./models/distilbert-base", help="Base model path")
+    parser.add_argument("--model_name", default="./models/distilbert-base-multilingual-cased", help="Base model path")
     parser.add_argument("--output_dir", default="./models/l2_finetuned", help="Output directory")
     parser.add_argument("--epochs", type=int, default=3, help="Number of epochs")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
