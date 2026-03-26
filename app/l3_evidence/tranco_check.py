@@ -3,9 +3,9 @@
 import csv
 import logging
 from pathlib import Path
-from urllib.parse import urlparse
 
 from app.config import settings
+from app.utils import extract_domain as _extract_domain_raw
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,8 @@ def _load_tranco() -> dict[str, int]:
 
 
 def _extract_domain(url: str) -> str:
-    """Extract the registrable domain from a URL."""
-    parsed = urlparse(url if "://" in url else f"http://{url}")
-    host = (parsed.netloc or parsed.path.split("/")[0]).lower()
-    # Remove www. prefix
+    """Extract domain from URL, stripping 'www.' prefix for Tranco lookup."""
+    host = _extract_domain_raw(url)
     if host.startswith("www."):
         host = host[4:]
     return host

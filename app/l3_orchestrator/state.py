@@ -1,4 +1,4 @@
-"""LangGraph state definition for L3 investigation workflow."""
+"""State definition for the L3 investigation pipeline."""
 
 from __future__ import annotations
 
@@ -10,13 +10,16 @@ from app.schemas import ParsedEmail, EvidenceBundle, JudgeVerdict, Verdict
 
 
 class InvestigationState(BaseModel):
-    """State passed through the LangGraph investigation workflow."""
+    """State passed through the L3 investigation pipeline."""
 
     # Input
     email: ParsedEmail
 
     # Extracted URLs to investigate
     urls: list[str] = Field(default_factory=list)
+
+    # URLs decoded from QR code images embedded in the email
+    qr_urls: list[str] = Field(default_factory=list)
 
     # Evidence gathered for each URL
     evidence_bundles: list[EvidenceBundle] = Field(default_factory=list)

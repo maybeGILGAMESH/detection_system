@@ -6,6 +6,7 @@ Stores in a simple JSON file for the diploma demo; swap for PostgreSQL later.
 
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,7 @@ _decisions: list[dict] = []
 _inbox: list[dict] = []
 
 _loaded = False
+_lock = threading.Lock()
 
 
 def _ensure_dir():
@@ -86,24 +88,25 @@ def add_pending(
     evidence_summary: str = "",
 ):
     """Add an email to the operator review queue."""
-    _load()
-    item = {
-        "email_id": email_id,
-        "sender": email.sender,
-        "recipient": email.recipient,
-        "subject": email.subject,
-        "body_preview": email.body[:500] if email.body else "",
-        "full_body": email.body,
-        "urls": email.urls[:10],
-        "l2_confidence": round(l2_result.confidence, 4) if l2_result else 0.0,
-        "l3_confidence": round(l3_verdict.confidence, 2) if l3_verdict else 0.0,
-        "l3_reasoning": l3_verdict.reasoning if l3_verdict else "",
-        "evidence_summary": evidence_summary,
-        "timestamp": time.time(),
-    }
-    _pending[email_id] = item
-    _save_pending()
-    logger.info("Added email %s to operator review queue (total: %d)", email_id, len(_pending))
+    with _lock:
+        _load()
+        item = {
+            "email_id": email_id,
+            "sender": email.sender,
+            "recipient": email.recipient,
+            "subject": email.subject,
+            "body_preview": email.body[:500] if email.body else "",
+            "full_body": email.body,
+            "urls": email.urls[:10],
+            "l2_confidence": round(l2_result.confidence, 4) if l2_result else 0.0,
+            "l3_confidence": round(l3_verdict.confidence, 2) if l3_verdict else 0.0,
+            "l3_reasoning": l3_verdict.reasoning if l3_verdict else "",
+            "evidence_summary": evidence_summary,
+            "timestamp": time.time(),
+        }
+        _pending[email_id] = item
+        _save_pending()
+        logger.info("Added email %s to operator review queue (total: %d)", email_id, len(_pending))
 
 
 def get_pending() -> list[OperatorPendingItem]:
@@ -114,31 +117,31 @@ def get_pending() -> list[OperatorPendingItem]:
 
 def resolve_pending(decision: OperatorDecision) -> bool:
     """Operator resolves an email: mark as phishing or safe."""
-    _load()
-    if decision.email_id not in _pending:
-        return False
+    with _lock:
+        _load()
+        if decision.email_id not in _pending:
+            return False
 
-    pending_item = _pending.pop(decision.email_id)
-    _save_pending()
+        pending_item = _pending.pop(decision.email_id)
+        _save_pending()
 
-    # Store the decision for future retraining
-    record = {
-        "email_id": decision.email_id,
-        "operator_label": decision.operator_label.value,
-        "comment": decision.comment,
-        "subject": pending_item.get("subject", ""),
-        "body": pending_item.get("full_body", pending_item.get("body_preview", "")),
-        "sender": pending_item.get("sender", ""),
-        "timestamp": time.time(),
-    }
-    _decisions.append(record)
-    _save_decisions()
+        record = {
+            "email_id": decision.email_id,
+            "operator_label": decision.operator_label.value,
+            "comment": decision.comment,
+            "subject": pending_item.get("subject", ""),
+            "body": pending_item.get("full_body", pending_item.get("body_preview", "")),
+            "sender": pending_item.get("sender", ""),
+            "timestamp": time.time(),
+        }
+        _decisions.append(record)
+        _save_decisions()
 
-    logger.info(
-        "Operator resolved %s as %s (%d decisions total)",
-        decision.email_id, decision.operator_label.value, len(_decisions),
-    )
-    return True
+        logger.info(
+            "Operator resolved %s as %s (%d decisions total)",
+            decision.email_id, decision.operator_label.value, len(_decisions),
+        )
+        return True
 
 
 def get_decisions() -> list[dict]:
@@ -155,8 +158,9 @@ def get_decision_count() -> int:
 def clear_decisions():
     """Clear decisions after retraining."""
     global _decisions
-    _decisions = []
-    _save_decisions()
+    with _lock:
+        _decisions = []
+        _save_decisions()
 
 
 # -- User Inbox --
@@ -169,22 +173,22 @@ def add_to_inbox(
     safety_note: str = "",
 ):
     """Add an email to the user's inbox."""
-    _load()
-    item = {
-        "email_id": email_id,
-        "sender": email.sender,
-        "subject": email.subject,
-        "body_preview": email.body[:300] if email.body else "",
-        "summary": summary,
-        "safety_note": safety_note,
-        "action": action.value,
-        "timestamp": time.time(),
-    }
-    _inbox.append(item)
-    # Keep last 200 emails
-    if len(_inbox) > 200:
-        _inbox[:] = _inbox[-200:]
-    _save_inbox()
+    with _lock:
+        _load()
+        item = {
+            "email_id": email_id,
+            "sender": email.sender,
+            "subject": email.subject,
+            "body_preview": email.body[:300] if email.body else "",
+            "summary": summary,
+            "safety_note": safety_note,
+            "action": action.value,
+            "timestamp": time.time(),
+        }
+        _inbox.append(item)
+        if len(_inbox) > 200:
+            _inbox[:] = _inbox[-200:]
+        _save_inbox()
 
 
 def get_inbox(limit: int = 50) -> list[InboxItem]:
@@ -197,6 +201,7 @@ def get_inbox(limit: int = 50) -> list[InboxItem]:
 
 def clear_inbox():
     global _inbox
-    _inbox = []
-    _save_inbox()
+    with _lock:
+        _inbox = []
+        _save_inbox()
 

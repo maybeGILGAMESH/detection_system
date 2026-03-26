@@ -1,7 +1,7 @@
-"""LangGraph workflow for L3 deep investigation.
+"""Async sequential pipeline for L3 deep investigation.
 
-Graph:
-  [START] → extract_urls → gather_evidence → judge_verdict → make_decision → [END]
+Pipeline:
+  extract_urls → gather_evidence → judge_verdict → make_decision
 
 Publishes real-time events for each step.
 """
@@ -12,6 +12,7 @@ import re
 from app.schemas import Verdict, Label
 from app.l3_orchestrator.state import InvestigationState
 from app.l3_evidence.service import investigate_urls
+from app.l3_evidence.qr_scanner import extract_qr_urls
 from app.l3_judge.service import judge as judge_email
 from app import events
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Graph Nodes
 
 async def extract_urls(state: InvestigationState, email_id: str = "") -> InvestigationState:
-    """Extract URLs from the email body and populate state.urls."""
+    """Extract URLs from the email body (including QR codes) and populate state.urls."""
     urls = set(state.email.urls)
 
     url_pattern = re.compile(r'https?://[^\s<>"\']+')
@@ -32,14 +33,27 @@ async def extract_urls(state: InvestigationState, email_id: str = "") -> Investi
         found_html = url_pattern.findall(state.email.html_body)
         urls.update(found_html)
 
-    # Keep all URLs — even trusted domains may be spoofed in phishing
+    # Scan for QR codes embedded as base64 images in the HTML body
+    qr_urls = extract_qr_urls(state.email)
+    if qr_urls:
+        state.qr_urls = qr_urls
+        urls.update(qr_urls)
+        logger.info("QR scanner found %d URL(s): %s", len(qr_urls), qr_urls)
+        await events.publish("l3_step", email_id, "L3", {
+            "step": "qr_urls_found",
+            "qr_urls": qr_urls,
+            "message": f"QR code scanner decoded {len(qr_urls)} URL(s) from embedded images",
+        })
+
     state.urls = list(urls)[:5]
     logger.info("Extracted %d URLs for investigation: %s", len(state.urls), state.urls)
 
     await events.publish("l3_step", email_id, "L3", {
         "step": "extract_urls",
         "urls": state.urls,
-        "message": f"Extracted {len(state.urls)} suspicious URLs for investigation",
+        "qr_urls": state.qr_urls,
+        "message": f"Extracted {len(state.urls)} URLs for investigation"
+                   + (f" ({len(state.qr_urls)} from QR codes)" if state.qr_urls else ""),
     })
     return state
 
@@ -96,9 +110,8 @@ async def gather_evidence(state: InvestigationState, email_id: str = "") -> Inve
                 }
             evidence_data["tranco_rank"] = b.tranco_rank
             evidence_data["redirects"] = b.redirect_chain[:10]
-            # Include screenshot (truncated for WS bandwidth)
             if b.screenshot_base64:
-                evidence_data["screenshot_b64"] = b.screenshot_base64[:5000]  # first ~3.7KB
+                evidence_data["screenshot_b64"] = b.screenshot_base64
 
             await events.publish("l3_evidence", email_id, "L3", evidence_data)
 
@@ -130,7 +143,9 @@ async def judge_verdict(state: InvestigationState, email_id: str = "") -> Invest
     })
 
     try:
-        verdict = await judge_email(state.email, evidence, email_id=email_id)
+        verdict = await judge_email(
+            state.email, evidence, email_id=email_id, qr_urls=state.qr_urls,
+        )
         state.verdict = verdict
         logger.info("Judge verdict: %s (confidence=%.2f)", verdict.verdict, verdict.confidence)
 

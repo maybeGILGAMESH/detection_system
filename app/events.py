@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import time
+from collections import deque
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -16,8 +17,8 @@ _subscribers: list[asyncio.Queue] = []
 _lock = asyncio.Lock()
 
 # History buffer (last N events for new clients)
-_history: list[dict] = []
 _HISTORY_MAX = 200
+_history: deque[dict] = deque(maxlen=_HISTORY_MAX)
 
 
 def _make_event(
@@ -48,8 +49,6 @@ async def publish(
     # Add to history (skip CoT tokens — too many, would bloat history)
     if event_type != "l3_cot_token":
         _history.append(event)
-        if len(_history) > _HISTORY_MAX:
-            _history.pop(0)
 
     # Broadcast to subscribers
     async with _lock:

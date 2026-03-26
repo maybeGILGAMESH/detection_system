@@ -38,14 +38,16 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app import __version__
 from app.config import settings
 from app import events
 from app import operator_store
+from app.auth import require_operator_key
 from app.schemas import Label, OperatorDecision, Verdict
 from app.layer_toggle import layer_state, set_layer, get_layers
 
@@ -104,6 +106,9 @@ async def lifespan(app: FastAPI):
         _smtp_controller.stop()
         logger.info("[SMTP] Server stopped")
 
+    from app.l1_threat_intel.checkers.http_client import close_client
+    await close_client()
+
     logger.info("Detect Email shut down.")
 
 
@@ -112,7 +117,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Detect Email — AI Phishing Defense",
     description="Multi-layer AI cascade for phishing email detection (L1 → L2 → L3 → Operator)",
-    version="1.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -179,7 +184,7 @@ class LayerToggle(BaseModel):
     enabled: bool
 
 
-@app.post("/api/v1/layers", tags=["System"])
+@app.post("/api/v1/layers", tags=["System"], dependencies=[Depends(require_operator_key)])
 async def set_layer_state(toggle: LayerToggle):
     """Enable or disable a protection layer (L1, L2, L3)."""
     ok = set_layer(toggle.layer, toggle.enabled)
@@ -202,7 +207,7 @@ async def api_info():
     """System overview in JSON format."""
     return {
         "service": "Detect Email — AI Phishing Defense",
-        "version": "1.1.0",
+        "version": __version__,
         "architecture": {
             "L1": "Threat Intel — URL/IP/domain reputation",
             "L2": "Classifier — DistilBERT text classification",
@@ -259,7 +264,7 @@ async def operator_pending():
     return {"count": len(pending), "items": [p.dict() for p in pending]}
 
 
-@app.post("/api/v1/operator/decide", tags=["Operator"])
+@app.post("/api/v1/operator/decide", tags=["Operator"], dependencies=[Depends(require_operator_key)])
 async def operator_decide(decision: OperatorDecision):
     """Submit operator's classification for an uncertain email."""
     ok = operator_store.resolve_pending(decision)
@@ -291,7 +296,7 @@ async def operator_decisions():
     return {"count": len(decisions), "items": decisions}
 
 
-@app.post("/api/v1/operator/retrain", tags=["Operator"])
+@app.post("/api/v1/operator/retrain", tags=["Operator"], dependencies=[Depends(require_operator_key)])
 async def operator_retrain():
     """Trigger incremental DistilBERT retraining using operator decisions.
 
@@ -333,7 +338,7 @@ async def operator_retrain():
         )
 
         # Don't await — let it run in background
-        asyncio.get_event_loop().call_later(
+        asyncio.get_running_loop().call_later(
             1.0,
             lambda: _check_retrain(proc),
         )
@@ -353,7 +358,7 @@ def _check_retrain(proc):
     ret = proc.poll()
     if ret is None:
         # Still running, check again later
-        asyncio.get_event_loop().call_later(5.0, lambda: _check_retrain(proc))
+        asyncio.get_running_loop().call_later(5.0, lambda: _check_retrain(proc))
     elif ret == 0:
         logger.info("DistilBERT retraining completed successfully!")
         # Hot-reload the model

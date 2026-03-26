@@ -186,7 +186,7 @@ def _summarize_sync(prompt: str) -> str:
 
 async def _generate(prompt: str) -> str:
     """Non-blocking wrapper: runs LLM inference in thread pool."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, _generate_sync, prompt)
 
 
@@ -198,7 +198,7 @@ async def _generate_streaming(prompt: str, email_id: str) -> str:
     """
     from app import events
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     token_queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
 
     # Start generation in thread pool
@@ -338,6 +338,7 @@ async def judge(
     email: ParsedEmail,
     evidence: EvidenceBundle | None = None,
     email_id: str = "",
+    qr_urls: list[str] | None = None,
 ) -> JudgeVerdict:
     """Run the DeepSeek Judge on an email with its evidence bundle.
 
@@ -346,8 +347,7 @@ async def judge(
     """
     async with _inference_lock:
         if _llm is None:
-            # Load in thread pool too — it's heavy
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(_executor, load_model)
 
         prompt = build_judge_prompt(
@@ -357,6 +357,7 @@ async def judge(
             body=email.body,
             urls=email.urls,
             evidence=evidence,
+            qr_urls=qr_urls,
         )
 
         logger.info("L3 Judge: analyzing email from %s, subject='%s'", email.sender, email.subject)
@@ -416,7 +417,7 @@ async def summarize_email(email: ParsedEmail) -> str:
             "Summary:"
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await asyncio.wait_for(
             loop.run_in_executor(_executor, _summarize_sync, prompt),
             timeout=30,

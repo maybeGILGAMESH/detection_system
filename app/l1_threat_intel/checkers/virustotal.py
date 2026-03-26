@@ -7,6 +7,8 @@ import httpx
 
 from app.config import settings
 from app.schemas import CheckerResult
+from app.l1_threat_intel.checkers.http_client import get_client
+from app.l1_threat_intel.checkers import cache
 
 logger = logging.getLogger(__name__)
 
@@ -18,29 +20,35 @@ async def check_url(url: str) -> CheckerResult:
     if not settings.virustotal_api_key:
         return CheckerResult(source="virustotal", detail="API key not configured")
 
+    cached = cache.get(cache.make_key("vt_url", url))
+    if cached is not None:
+        return cached
+
     url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
     headers = {"x-apikey": settings.virustotal_api_key}
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{_VT_URL}/urls/{url_id}", headers=headers)
+        client = get_client()
+        resp = await client.get(f"{_VT_URL}/urls/{url_id}", headers=headers)
 
-            if resp.status_code == 404:
-                return CheckerResult(source="virustotal", detail="URL not found in VT database")
+        if resp.status_code == 404:
+            return CheckerResult(source="virustotal", detail="URL not found in VT database")
 
-            resp.raise_for_status()
-            data = resp.json()
+        resp.raise_for_status()
+        data = resp.json()
 
-            stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-            malicious = stats.get("malicious", 0)
-            suspicious = stats.get("suspicious", 0)
+        stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
 
-            is_bad = (malicious + suspicious) > 0
-            return CheckerResult(
-                source="virustotal",
-                is_malicious=is_bad,
-                detail=f"malicious={malicious}, suspicious={suspicious}",
-            )
+        is_bad = (malicious + suspicious) > 0
+        result = CheckerResult(
+            source="virustotal",
+            is_malicious=is_bad,
+            detail=f"malicious={malicious}, suspicious={suspicious}",
+        )
+        cache.put(cache.make_key("vt_url", url), result)
+        return result
     except httpx.HTTPStatusError as e:
         logger.warning("VirusTotal HTTP error: %s", e)
         return CheckerResult(source="virustotal", detail=f"HTTP error: {e.response.status_code}")
@@ -54,29 +62,34 @@ async def check_domain(domain: str) -> CheckerResult:
     if not settings.virustotal_api_key:
         return CheckerResult(source="virustotal", detail="API key not configured")
 
+    cached = cache.get(cache.make_key("vt_domain", domain))
+    if cached is not None:
+        return cached
+
     headers = {"x-apikey": settings.virustotal_api_key}
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{_VT_URL}/domains/{domain}", headers=headers)
+        client = get_client()
+        resp = await client.get(f"{_VT_URL}/domains/{domain}", headers=headers)
 
-            if resp.status_code == 404:
-                return CheckerResult(source="virustotal", detail="Domain not found")
+        if resp.status_code == 404:
+            return CheckerResult(source="virustotal", detail="Domain not found")
 
-            resp.raise_for_status()
-            data = resp.json()
+        resp.raise_for_status()
+        data = resp.json()
 
-            stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-            malicious = stats.get("malicious", 0)
-            suspicious = stats.get("suspicious", 0)
+        stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
 
-            is_bad = (malicious + suspicious) > 0
-            return CheckerResult(
-                source="virustotal",
-                is_malicious=is_bad,
-                detail=f"domain malicious={malicious}, suspicious={suspicious}",
-            )
+        is_bad = (malicious + suspicious) > 0
+        result = CheckerResult(
+            source="virustotal",
+            is_malicious=is_bad,
+            detail=f"domain malicious={malicious}, suspicious={suspicious}",
+        )
+        cache.put(cache.make_key("vt_domain", domain), result)
+        return result
     except Exception as e:
         logger.warning("VirusTotal domain error: %s", e)
         return CheckerResult(source="virustotal", detail=f"Error: {e}")
-

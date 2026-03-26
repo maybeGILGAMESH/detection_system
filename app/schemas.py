@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # Enums
@@ -31,18 +31,17 @@ class Label(str, Enum):
 class ParsedEmail(BaseModel):
     """Structured representation of an incoming email."""
     message_id: str = ""
-    sender: str = ""
-    recipient: str = ""
-    subject: str = ""
-    body: str = ""
-    html_body: str = ""
-    urls: list[str] = Field(default_factory=list)
-    ips: list[str] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    raw: str = ""
+    sender: str = Field(default="", max_length=500)
+    recipient: str = Field(default="", max_length=500)
+    subject: str = Field(default="", max_length=2000)
+    body: str = Field(default="", max_length=500_000)
+    html_body: str = Field(default="", max_length=500_000)
+    urls: list[str] = Field(default_factory=list, max_length=200)
+    ips: list[str] = Field(default_factory=list, max_length=100)
+    domains: list[str] = Field(default_factory=list, max_length=200)
+    raw: str = Field(default="", max_length=10_000_000)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # L1

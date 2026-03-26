@@ -2,6 +2,7 @@
 fastapi==0.133.1
 uvicorn==0.41.0
 pydantic==2.12.5
+pydantic-settings>=2.0
 python-dotenv==1.2.1
 starlette==0.52.1
 
@@ -25,6 +26,11 @@ scipy==1.15.3
 # L3: Evidence Agent
 playwright==1.58.0
 python-whois==0.9.6
+Pillow>=10.0
+pyzbar>=0.1.9
+
+# QR code generation (bombardier test emails)
+qrcode>=7.0
 
 # L3: Judge (CUDA wheel from abetlen index)
 llama_cpp_python==0.3.16

@@ -53,6 +53,10 @@ URLs found: {urls}
 4. REDIRECTS:
    {redirect_chain}
 
+5. QR CODES:
+   - QR codes detected in email: {qr_detected}
+   - URLs decoded from QR codes: {qr_urls}
+
 --- INSTRUCTIONS ---
 Reason step-by-step:
 1) Is the sender domain suspicious?
@@ -76,6 +80,7 @@ def build_judge_prompt(
     body: str = "",
     urls: list[str] | None = None,
     evidence=None,
+    qr_urls: list[str] | None = None,
 ) -> str:
     """Build the full prompt for the DeepSeek Judge."""
 
@@ -97,6 +102,9 @@ def build_judge_prompt(
     ext_scripts = "None"
     iframes = "0"
     redirect_chain = "(no data)"
+
+    qr_detected = "Yes" if qr_urls else "No"
+    qr_urls_str = ", ".join(qr_urls) if qr_urls else "(none)"
 
     if evidence:
         evidence_url = evidence.url
@@ -144,4 +152,6 @@ def build_judge_prompt(
         ext_scripts=ext_scripts,
         iframes=iframes,
         redirect_chain=redirect_chain,
+        qr_detected=qr_detected,
+        qr_urls=qr_urls_str,
     )

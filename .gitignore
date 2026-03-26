@@ -18,6 +18,7 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 
@@ -36,18 +37,29 @@ data/
 htmlcov/
 .coverage
 
-# Images (test screenshots etc.)
-*.jpg
-*.png
+# Debug screenshots (Playwright captures saved during L3)
+debug_screenshots/
 
 # Generated graphics / notebook outputs
 results_graphics/
 .ipynb_checkpoints/
 
-# others 
-*.txt
-!requirements.txt
+# Binary / media files (not part of source)
+*.jpg
+*.png
+*.gif
+*.mp4
+*.zip
+*.tar.gz
+
+# Notebooks / office docs
 *.ipynb
 *.docx
+
+# Misc text files (keep requirements.txt)
+*.txt
+!requirements.txt
+
+# Plan / description docs
 PLAN.md
 diploma_description.md

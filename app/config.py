@@ -1,75 +1,57 @@
-"""Application configuration loaded from .env file."""
+"""Application configuration loaded from .env file using Pydantic BaseSettings."""
 
-import os
 from pathlib import Path
-from dataclasses import dataclass, field
 
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load .env from project root
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_PROJECT_ROOT / ".env")
 
 
-def _env(key: str, default: str = "") -> str:
-    return os.getenv(key, default)
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=_PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-
-@dataclass
-class Settings:
     # API Keys
-    virustotal_api_key: str = field(default_factory=lambda: _env("VIRUSTOTAL_API_KEY"))
-    abuseipdb_api_key: str = field(default_factory=lambda: _env("ABUSEIPDB_API_KEY"))
+    virustotal_api_key: str = ""
+    abuseipdb_api_key: str = ""
 
     # Model paths
-    distilbert_model_path: str = field(
-        default_factory=lambda: _env("DISTILBERT_MODEL_PATH", "./models/distilbert-base")
-    )
-    l2_finetuned_model_path: str = field(
-        default_factory=lambda: _env("L2_FINETUNED_MODEL_PATH", "./models/l2_finetuned")
-    )
-    deepseek_model_path: str = field(
-        default_factory=lambda: _env("DEEPSEEK_MODEL_PATH", "./models/deepseek-r1-14b")
-    )
-    deepseek_gguf_path: str = field(
-        default_factory=lambda: _env(
-            "DEEPSEEK_GGUF_PATH",
-            "./models/deepseek-r1-14b-gguf/DeepSeek-R1-Distill-Qwen-14B-Q8_0.gguf",
-        )
+    distilbert_model_path: str = "./models/distilbert-base"
+    l2_finetuned_model_path: str = "./models/l2_finetuned"
+    deepseek_model_path: str = "./models/deepseek-r1-14b"
+    deepseek_gguf_path: str = (
+        "./models/deepseek-r1-14b-gguf/DeepSeek-R1-Distill-Qwen-14B-Q8_0.gguf"
     )
 
     # Dataset paths
-    phishtank_csv_path: str = field(
-        default_factory=lambda: _env("PHISHTANK_CSV_PATH", "./datasets/phishtank.csv")
-    )
-    tranco_csv_path: str = field(
-        default_factory=lambda: _env("TRANCO_CSV_PATH", "./datasets/top-1m.csv")
-    )
+    phishtank_csv_path: str = "./datasets/phishtank.csv"
+    tranco_csv_path: str = "./datasets/top-1m.csv"
 
     # Service settings
-    smtp_host: str = field(default_factory=lambda: _env("SMTP_HOST", "0.0.0.0"))
-    smtp_port: int = field(default_factory=lambda: int(_env("SMTP_PORT", "1025")))
-    api_host: str = field(default_factory=lambda: _env("API_HOST", "0.0.0.0"))
-    api_port: int = field(default_factory=lambda: int(_env("API_PORT", "8000")))
+    smtp_host: str = "0.0.0.0"
+    smtp_port: int = 1025
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
 
     # Thresholds (applied AFTER temperature scaling)
-    l2_safe_threshold: float = field(
-        default_factory=lambda: float(_env("L2_SAFE_THRESHOLD", "0.7"))
-    )
-    l2_phish_threshold: float = field(
-        default_factory=lambda: float(_env("L2_PHISH_THRESHOLD", "0.3"))
-    )
+    l2_safe_threshold: float = 0.7
+    l2_phish_threshold: float = 0.3
 
     # Temperature scaling for L2 calibration (>1.0 = softer probabilities)
-    l2_temperature: float = field(
-        default_factory=lambda: float(_env("L2_TEMPERATURE", "2.5"))
-    )
+    l2_temperature: float = 2.5
 
     # Judge backend
-    judge_backend: str = field(
-        default_factory=lambda: _env("JUDGE_BACKEND", "llama_cpp")
-    )
+    judge_backend: str = "llama_cpp"
+
+    # Operator authentication (empty = disabled)
+    operator_api_key: str = ""
+
+    # Max email size accepted via SMTP / API (bytes, default 10 MB)
+    max_email_size: int = 10 * 1024 * 1024
 
 
 settings = Settings()
-

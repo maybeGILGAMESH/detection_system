@@ -21,7 +21,7 @@ def test_parse_phishing_email(phishing_email_raw):
     email = parse_email(phishing_email_raw)
     assert email.sender == "security@fake-bank-alert.xyz"
     assert "URGENT" in email.subject
-    assert "compromised" in email.body.lower()
+    assert "unauthorized access" in email.body.lower()
     assert any("evil-phish.xyz" in u for u in email.urls)
     assert "fake-bank-alert.xyz" in email.domains or len(email.domains) > 0
 

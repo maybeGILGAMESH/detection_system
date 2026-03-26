@@ -408,7 +408,7 @@ function addEvidence(eid, d) {
   if(d.dom){const pc=d.dom.password_fields?'bad':'good';h+=`<div class="evidence-item"><h5>📄 DOM</h5><div>Forms: ${d.dom.forms}</div><div>Password: <span class="val ${pc}">${d.dom.password_fields?'YES ⚠':'No'}</span></div><div>Scripts: ${d.dom.external_scripts}</div><div>Iframes: ${d.dom.iframes}</div></div>`;}
   h+=`<div class="evidence-item"><h5>🏆 Tranco</h5><div class="val ${d.tranco_rank?'good':'bad'}">${d.tranco_rank?'#'+d.tranco_rank:'NOT IN TOP 1M ⚠'}</div></div>`;
   h+=`</div>`;
-  if(d.screenshot_b64) h+=`<img class="screenshot-thumb" src="data:image/png;base64,${d.screenshot_b64}" alt="Screenshot">`;
+  if(d.screenshot_b64) h+=`<img class="screenshot-thumb" src="data:image/jpeg;base64,${d.screenshot_b64}" alt="Screenshot">`;
   h+=`<div class="tl-time">${new Date().toLocaleTimeString()}</div></div></div>`;
   tl.insertAdjacentHTML('beforeend',h);
 }

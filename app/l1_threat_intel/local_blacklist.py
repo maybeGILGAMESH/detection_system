@@ -5,9 +5,9 @@ incident response, and internal threat intel feeds.
 """
 
 import logging
-from urllib.parse import urlparse
 
 from app.schemas import CheckerResult
+from app.utils import extract_domain
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +33,9 @@ BLACKLISTED_DOMAINS = {
 SUSPICIOUS_TLDS = {".tk", ".xyz", ".top", ".buzz", ".gq", ".ml", ".cf", ".ga", ".work", ".click"}
 
 
-def _extract_domain(url: str) -> str:
-    """Extract domain from URL."""
-    try:
-        parsed = urlparse(url if "://" in url else f"http://{url}")
-        return parsed.hostname or url
-    except Exception:
-        return url
-
-
 async def check_url(url: str) -> CheckerResult:
     """Check URL against local blacklist."""
-    domain = _extract_domain(url)
+    domain = extract_domain(url)
     return await check_domain(domain, detail_prefix=f"URL {url}")
 
 

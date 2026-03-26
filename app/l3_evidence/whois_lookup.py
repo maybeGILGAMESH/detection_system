@@ -1,33 +1,25 @@
 """WHOIS domain lookup."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 from app.schemas import WHOISInfo
+from app.utils import extract_domain
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_domain(url: str) -> str:
-    """Extract the registrable domain from a URL."""
-    parsed = urlparse(url if "://" in url else f"http://{url}")
-    return parsed.netloc or parsed.path.split("/")[0]
-
-
-async def lookup(url: str) -> WHOISInfo:
-    """Perform WHOIS lookup for the domain of a URL."""
-    domain = _extract_domain(url)
+def _lookup_sync(domain: str) -> WHOISInfo:
+    """Blocking WHOIS lookup — meant to be called via asyncio.to_thread."""
     info = WHOISInfo()
-
     try:
-        import whois  # python-whois
+        import whois
 
         w = whois.whois(domain)
 
         info.registrar = str(w.registrar or "")
 
-        # Creation date
         creation = w.creation_date
         if isinstance(creation, list):
             creation = creation[0]
@@ -37,14 +29,12 @@ async def lookup(url: str) -> WHOISInfo:
                 age = (datetime.now(timezone.utc) - creation.replace(tzinfo=timezone.utc)).days
                 info.domain_age_days = max(age, 0)
 
-        # Expiration date
         expiration = w.expiration_date
         if isinstance(expiration, list):
             expiration = expiration[0]
         if expiration:
             info.expiration_date = str(expiration)
 
-        # Country
         info.country = str(w.country or "")
 
     except Exception as e:
@@ -52,3 +42,8 @@ async def lookup(url: str) -> WHOISInfo:
 
     return info
 
+
+async def lookup(url: str) -> WHOISInfo:
+    """Perform WHOIS lookup for the domain of a URL (non-blocking)."""
+    domain = extract_domain(url)
+    return await asyncio.to_thread(_lookup_sync, domain)

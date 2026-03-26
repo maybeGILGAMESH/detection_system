@@ -10,8 +10,10 @@ from threading import Thread
 
 from aiosmtpd.controller import Controller
 
+from app.config import settings
 from app.gateway.email_parser import parse_email
 from app.gateway.router import process_email
+from app.schemas import Verdict
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,13 @@ class PhishingHandler:
             mail_from, peer, rcpt_tos, len(raw_content),
         )
 
+        if len(raw_content) > settings.max_email_size:
+            logger.warning(
+                "[SMTP] Message too large (%d bytes > %d limit), rejected",
+                len(raw_content), settings.max_email_size,
+            )
+            return "552 Message too large"
+
         try:
             # Parse the raw email
             parsed = parse_email(raw_content)
@@ -47,7 +56,7 @@ class PhishingHandler:
             )
 
             # Return SMTP status based on result
-            if result.action in ("REJECT", "DELETE"):
+            if result.action in (Verdict.REJECT, Verdict.DELETE):
                 return "550 Message rejected: phishing detected"
             else:
                 return "250 OK"
@@ -69,7 +78,12 @@ def start_smtp_server(host: str = "0.0.0.0", port: int = 1025) -> Controller:
         The Controller instance (call .stop() to shut down).
     """
     handler = PhishingHandler()
-    controller = Controller(handler, hostname=host, port=port)
+    controller = Controller(
+        handler,
+        hostname=host,
+        port=port,
+        data_size_limit=settings.max_email_size,
+    )
     controller.start()
     logger.info("[SMTP] Server started on %s:%d", host, port)
     return controller

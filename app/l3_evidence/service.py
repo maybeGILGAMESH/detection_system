@@ -7,7 +7,7 @@ import asyncio
 import logging
 
 from app.schemas import EvidenceBundle
-from app.l3_evidence import screenshot, dom_analyzer, whois_lookup, ssl_checker, tranco_check
+from app.l3_evidence import screenshot, whois_lookup, ssl_checker, tranco_check
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,12 @@ async def investigate_url(url: str) -> EvidenceBundle:
     logger.info("L3 Evidence: investigating %s", url)
 
     try:
-        # Run all evidence gathering in parallel with timeout
+        # Run evidence gathering in parallel with timeout.
+        # screenshot.capture_and_analyze opens one Playwright session for
+        # both screenshot and DOM analysis, avoiding a second browser launch.
         results = await asyncio.wait_for(
             asyncio.gather(
-                screenshot.capture(url),
-                dom_analyzer.analyze(url),
+                screenshot.capture_and_analyze(url),
                 whois_lookup.lookup(url),
                 ssl_checker.check(url),
                 tranco_check.check(url),
@@ -37,13 +38,12 @@ async def investigate_url(url: str) -> EvidenceBundle:
         )
 
         # Unpack results (handle exceptions gracefully)
-        screenshot_result = results[0] if not isinstance(results[0], Exception) else ("", [])
-        dom_result = results[1] if not isinstance(results[1], Exception) else None
-        whois_result = results[2] if not isinstance(results[2], Exception) else None
-        ssl_result = results[3] if not isinstance(results[3], Exception) else None
-        tranco_result = results[4] if not isinstance(results[4], Exception) else None
+        pw_result = results[0] if not isinstance(results[0], Exception) else ("", [], None)
+        whois_result = results[1] if not isinstance(results[1], Exception) else None
+        ssl_result = results[2] if not isinstance(results[2], Exception) else None
+        tranco_result = results[3] if not isinstance(results[3], Exception) else None
 
-        screenshot_b64, redirect_chain = screenshot_result
+        screenshot_b64, redirect_chain, dom_result = pw_result
 
         bundle = EvidenceBundle(
             url=url,
