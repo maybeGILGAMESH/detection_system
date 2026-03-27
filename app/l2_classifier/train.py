@@ -6,6 +6,8 @@ Run standalone:
 """
 
 import argparse
+import hashlib
+import json
 import logging
 import sys
 from pathlib import Path
@@ -23,6 +25,8 @@ from transformers import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+RANDOM_STATE = 42
 
 
 # Dataset
@@ -52,21 +56,26 @@ class EmailDataset(Dataset):
 # Data Loading
 
 def load_data(dataset_path: str) -> tuple[list[str], list[int]]:
-    """Load and merge phishing + legitimate email datasets.
+    """Load and merge all available text datasets.
 
-    Labels: 0 = safe, 1 = phishing
+    Loads (when present):
+      1. phishing_emails/Phishing_Email.csv  (EN phishing + safe)
+      2. enron/emails.csv                    (EN safe, max 10K)
+      3. russian-spam-detection/processed_combined.parquet  (RU, sampled 30K)
+      4. telegram_spam_cleaned.csv           (RU spam supplement)
+
+    Labels: 0 = safe, 1 = phishing/spam
     """
     dataset_dir = Path(dataset_path)
     texts = []
     labels = []
 
-    # --- Kaggle Phishing Email Dataset ---
+    # --- 1. Kaggle Phishing Email Dataset ---
     phish_csv = dataset_dir / "phishing_emails" / "Phishing_Email.csv"
     if phish_csv.exists():
         logger.info("Loading phishing dataset from %s", phish_csv)
         df = pd.read_csv(phish_csv)
 
-        # Try common column names
         text_col = None
         label_col = None
         for col in df.columns:
@@ -77,6 +86,7 @@ def load_data(dataset_path: str) -> tuple[list[str], list[int]]:
                 label_col = col
 
         if text_col and label_col:
+            before = len(texts)
             for _, row in df.iterrows():
                 text = str(row[text_col]).strip()
                 raw_label = str(row[label_col]).strip().lower()
@@ -86,19 +96,19 @@ def load_data(dataset_path: str) -> tuple[list[str], list[int]]:
 
                 if raw_label in ("phishing email", "phishing", "1", "spam", "phish"):
                     labels.append(1)
-                    texts.append(text)
+                    texts.append(text[:2000])
                 elif raw_label in ("safe email", "safe", "0", "ham", "legitimate"):
                     labels.append(0)
-                    texts.append(text)
-            logger.info("Loaded %d samples from phishing CSV", len(texts))
+                    texts.append(text[:2000])
+            logger.info("  -> %d samples from phishing CSV", len(texts) - before)
         else:
             logger.warning("Could not identify columns in %s: %s", phish_csv, list(df.columns))
 
-    # --- Enron Dataset (legitimate emails) ---
+    # --- 2. Enron Dataset (legitimate emails) ---
     enron_csv = dataset_dir / "enron" / "emails.csv"
     if enron_csv.exists():
         logger.info("Loading Enron dataset from %s", enron_csv)
-        enron_df = pd.read_csv(enron_csv, nrows=10000)  # Limit for balance
+        enron_df = pd.read_csv(enron_csv, nrows=10_000)
 
         msg_col = None
         for col in enron_df.columns:
@@ -112,21 +122,93 @@ def load_data(dataset_path: str) -> tuple[list[str], list[int]]:
                 text = str(row[msg_col]).strip()
                 if not text or text == "nan" or len(text) < 20:
                     continue
-                # Truncate very long emails
                 texts.append(text[:2000])
-                labels.append(0)  # safe
+                labels.append(0)
                 count += 1
-            logger.info("Loaded %d Enron samples (safe)", count)
+            logger.info("  -> %d Enron samples (safe)", count)
+
+    # --- 3. Russian Spam Detection (HuggingFace, parquet) ---
+    ru_parquet = dataset_dir / "russian-spam-detection" / "processed_combined.parquet"
+    if ru_parquet.exists():
+        logger.info("Loading Russian Spam Detection from %s", ru_parquet)
+        rdf = pd.read_parquet(ru_parquet)
+        spam = rdf[rdf["label"] == 1].sample(
+            n=min(15_000, len(rdf[rdf["label"] == 1])), random_state=RANDOM_STATE,
+        )
+        ham = rdf[rdf["label"] == 0].sample(
+            n=min(15_000, len(rdf[rdf["label"] == 0])), random_state=RANDOM_STATE,
+        )
+        count = 0
+        for _, row in pd.concat([spam, ham]).iterrows():
+            text = str(row["message"]).strip()
+            if not text or text == "nan" or len(text) < 10:
+                continue
+            texts.append(text[:2000])
+            labels.append(int(row["label"]))
+            count += 1
+        logger.info("  -> %d RU spam samples (15K spam + 15K safe sampled)", count)
+
+    # --- 4. Telegram Spam ---
+    tg_csv = dataset_dir / "telegram_spam_cleaned.csv"
+    if tg_csv.exists():
+        logger.info("Loading Telegram spam from %s", tg_csv)
+        tdf = pd.read_csv(tg_csv)
+        count = 0
+        for _, row in tdf.iterrows():
+            text = str(row.get("text", "")).strip()
+            raw_label = str(row.get("label", "")).strip().lower()
+            if not text or text == "nan":
+                continue
+            lbl = 1 if raw_label in ("spam", "1") else 0
+            texts.append(text[:2000])
+            labels.append(lbl)
+            count += 1
+        logger.info("  -> %d Telegram samples", count)
 
     if not texts:
         raise ValueError(
             f"No data loaded from {dataset_dir}. "
-            "Make sure phishing_emails/Phishing_Email.csv and/or enron/emails.csv exist."
+            "Expected at least one of: phishing_emails/, enron/, "
+            "russian-spam-detection/, telegram_spam_cleaned.csv"
         )
+
+    # --- Deduplication ---
+    seen = set()
+    dedup_texts = []
+    dedup_labels = []
+    for t, l in zip(texts, labels):
+        h = hashlib.md5(t.encode()).hexdigest()
+        if h not in seen:
+            seen.add(h)
+            dedup_texts.append(t)
+            dedup_labels.append(l)
+
+    dupes = len(texts) - len(dedup_texts)
+    if dupes:
+        logger.info("Removed %d duplicate texts", dupes)
+    texts, labels = dedup_texts, dedup_labels
 
     logger.info("Total dataset: %d samples (safe=%d, phishing=%d)",
                 len(texts), labels.count(0), labels.count(1))
     return texts, labels
+
+
+def _save_split_manifest(output_dir: str, train_texts: list[str], val_texts: list[str],
+                         train_labels: list[int], val_labels: list[int]):
+    """Save train/eval split hashes so eval_l2.py can reproduce the exact held-out set."""
+    manifest = {
+        "train_hashes": [hashlib.md5(t.encode()).hexdigest() for t in train_texts],
+        "val_hashes": [hashlib.md5(t.encode()).hexdigest() for t in val_texts],
+        "train_labels": train_labels,
+        "val_labels": val_labels,
+        "train_size": len(train_texts),
+        "val_size": len(val_texts),
+    }
+    path = Path(output_dir) / "split_manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    logger.info("Split manifest saved to %s (%d train, %d val)",
+                path, len(train_texts), len(val_texts))
 
 
 # Training
@@ -151,9 +233,11 @@ def train(
 
     # Split
     train_texts, val_texts, train_labels, val_labels = train_test_split(
-        texts, labels, test_size=test_size, random_state=42, stratify=labels,
+        texts, labels, test_size=test_size, random_state=RANDOM_STATE, stratify=labels,
     )
     logger.info("Train: %d, Val: %d", len(train_texts), len(val_texts))
+
+    _save_split_manifest(output_dir, train_texts, val_texts, train_labels, val_labels)
 
     # Tokenizer & model
     tokenizer = DistilBertTokenizer.from_pretrained(model_name)

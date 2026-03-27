@@ -1,4 +1,4 @@
-# Models and datasets (large files)
+# ======================== Models & Datasets ========================
 models/
 datasets/
 *.gguf
@@ -8,43 +8,60 @@ datasets/
 *.ot
 *.msgpack
 
-# Environment
+# ======================== Environment ========================
 .env
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 
-# IDE
+# ======================== IDE / Editor ========================
 .vscode/
 .idea/
 .cursor/
 *.swp
 *.swo
 
-# OS
+# ======================== OS ========================
 .DS_Store
 Thumbs.db
 
-# Data (operator decisions, inbox)
+# ======================== Data (runtime) ========================
 data/
 
-# Logs
+# ======================== Logs ========================
 *.log
 
-# Test artifacts
+# ======================== Test Artifacts ========================
 .pytest_cache/
 htmlcov/
 .coverage
 
-# Debug screenshots (Playwright captures saved during L3)
+# ======================== Debug / Playwright ========================
 debug_screenshots/
 
-# Generated graphics / notebook outputs
+# ======================== Generated Graphics ========================
 results_graphics/
+results_graphics copy/
+results_new/
 .ipynb_checkpoints/
 
-# Binary / media files (not part of source)
+# ======================== Metrics (standalone diploma folder) ========================
+metrics/
+
+# ======================== Extracted Archives / Duplicates ========================
+detection_system/
+detection_system.tar.gz
+
+# ======================== Standalone Scripts ========================
+smtp_bombardier.py
+test_all_levels.py
+
+# ======================== Misc Folders ========================
+image/
+scripts/
+
+# ======================== Binary / Media ========================
 *.jpg
 *.png
 *.gif
@@ -52,14 +69,14 @@ results_graphics/
 *.zip
 *.tar.gz
 
-# Notebooks / office docs
+# ======================== Notebooks / Office Docs ========================
 *.ipynb
 *.docx
 
-# Misc text files (keep requirements.txt)
+# ======================== Text Files (keep requirements.txt) ========================
 *.txt
 !requirements.txt
 
-# Plan / description docs
+# ======================== Plan / Description Docs ========================
 PLAN.md
 diploma_description.md
